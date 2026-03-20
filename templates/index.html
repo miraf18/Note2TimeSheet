@@ -1,0 +1,2160 @@
+<!DOCTYPE html>
+<html lang="it" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TimeSheet</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
+
+/* ── Design Tokens ─────────────────────────────────────────────── */
+:root {
+  --bg: #0a0a0f;
+  --bg-panel: #111118;
+  --bg-card: #1a1a24;
+  --bg-card-hover: #1f1f2e;
+  --border: rgba(255,255,255,0.07);
+  --border-hover: rgba(255,255,255,0.14);
+  --text: #e8e8f0;
+  --text-muted: #6b6b80;
+  --text-secondary: #a0a0b8;
+  --accent: #6366f1;
+  --accent-hover: #818cf8;
+  --accent-soft: rgba(99,102,241,0.12);
+  --success: #10b981;
+  --success-soft: rgba(16,185,129,0.12);
+  --error: #ef4444;
+  --error-soft: rgba(239,68,68,0.12);
+  --warning: #f59e0b;
+  --outlook: #8b5cf6;
+  --outlook-soft: rgba(139,92,246,0.12);
+  --radius: 12px;
+  --radius-sm: 8px;
+  --shadow: 0 4px 24px rgba(0,0,0,0.4);
+  --transition: 0.18s ease;
+}
+
+[data-theme="light"] {
+  --bg: #f4f4f8;
+  --bg-panel: #ffffff;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f8f8fc;
+  --border: rgba(0,0,0,0.08);
+  --border-hover: rgba(0,0,0,0.16);
+  --text: #1a1a2e;
+  --text-muted: #9090a8;
+  --text-secondary: #505068;
+  --accent: #6366f1;
+  --accent-hover: #4f46e5;
+  --accent-soft: rgba(99,102,241,0.08);
+  --success: #059669;
+  --success-soft: rgba(5,150,105,0.08);
+  --error: #dc2626;
+  --error-soft: rgba(220,38,38,0.08);
+  --outlook: #7c3aed;
+  --outlook-soft: rgba(124,58,237,0.08);
+  --shadow: 0 4px 24px rgba(0,0,0,0.08);
+}
+
+/* ── Reset & Base ──────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  transition: background var(--transition), color var(--transition);
+}
+
+/* ── Layout ────────────────────────────────────────────────────── */
+.app-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ── Header ────────────────────────────────────────────────────── */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  height: 60px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  gap: 16px;
+  z-index: 10;
+}
+
+.header-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.header-logo {
+  width: 32px;
+  height: 32px;
+  background: linear-gradient(135deg, var(--accent), var(--outlook));
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.header-title {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.header-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.header-date {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.header-time {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.03em;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.user-badge {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent), var(--outlook));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  flex-shrink: 0;
+  cursor: default;
+}
+
+.icon-btn {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color var(--transition), color var(--transition), background var(--transition);
+  flex-shrink: 0;
+}
+
+.icon-btn:hover {
+  border-color: var(--border-hover);
+  color: var(--text);
+  background: var(--bg-card);
+}
+
+/* ── Main Two-Column ───────────────────────────────────────────── */
+.main {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  flex: 1;
+  overflow: hidden;
+}
+
+@media (max-width: 900px) {
+  .main { grid-template-columns: 1fr; overflow-y: auto; }
+  .panel { overflow: visible; }
+  .panel-left { border-right: none; border-bottom: 1px solid var(--border); max-height: 60vh; }
+}
+
+/* ── Panels ────────────────────────────────────────────────────── */
+.panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-panel);
+}
+
+.panel-left {
+  border-right: 1px solid var(--border);
+}
+
+.panel-right {
+  background: var(--bg);
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px 12px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.panel-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.panel-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* ── Entry List ────────────────────────────────────────────────── */
+.entry-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.entry-list::-webkit-scrollbar { width: 4px; }
+.entry-list::-webkit-scrollbar-track { background: transparent; }
+.entry-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* ── Empty State ───────────────────────────────────────────────── */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  flex: 1;
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--text-muted);
+  min-height: 180px;
+}
+
+.empty-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--bg-card);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+}
+
+.empty-state p {
+  font-size: 13px;
+  line-height: 1.6;
+  max-width: 220px;
+}
+
+/* ── Entry Card ────────────────────────────────────────────────── */
+.entry-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 11px 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: border-color var(--transition), background var(--transition);
+  animation: slideInUp 0.22s ease both;
+  position: relative;
+}
+
+.entry-card:hover {
+  border-color: var(--border-hover);
+  background: var(--bg-card-hover);
+}
+
+@keyframes slideInUp {
+  from { transform: translateY(10px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+.entry-card-top {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.badge {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 2px 7px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.badge-activity {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.badge-outlook {
+  background: var(--outlook-soft);
+  color: var(--outlook);
+}
+
+.entry-time {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.entry-duration {
+  font-size: 10px;
+  font-weight: 500;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--success-soft);
+  color: var(--success);
+  flex-shrink: 0;
+}
+
+.entry-text {
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.55;
+  word-break: break-word;
+}
+
+.entry-actions {
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity var(--transition);
+  justify-content: flex-end;
+}
+
+.entry-card:hover .entry-actions { opacity: 1; }
+
+.entry-btn {
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--transition), color var(--transition);
+}
+
+.entry-btn:hover { background: var(--bg); color: var(--text); }
+
+.entry-btn.danger {
+  color: var(--error);
+  background: var(--error-soft);
+}
+
+.entry-edit-input {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  resize: none;
+  outline: none;
+  line-height: 1.5;
+}
+
+/* ── Composer ──────────────────────────────────────────────────── */
+.composer {
+  flex-shrink: 0;
+  padding: 10px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+
+.composer-inner {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: border-color var(--transition);
+}
+
+.composer-inner:focus-within { border-color: var(--accent); }
+
+.composer-textarea {
+  width: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  resize: none;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+  max-height: 120px;
+  overflow-y: auto;
+  min-height: 36px;
+}
+
+.composer-textarea::placeholder { color: var(--text-muted); }
+.composer-textarea::-webkit-scrollbar { width: 3px; }
+.composer-textarea::-webkit-scrollbar-thumb { background: var(--border); }
+
+.composer-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.composer-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.composer-btns { display: flex; gap: 6px; }
+
+/* ── Buttons ───────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition), opacity var(--transition), transform 0.1s ease;
+  white-space: nowrap;
+}
+
+.btn:active { transform: scale(0.97); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+
+.btn-primary {
+  padding: 7px 14px;
+  background: var(--accent);
+  color: #fff;
+}
+
+.btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+
+.btn-secondary {
+  padding: 7px 14px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  border-color: var(--border-hover);
+  color: var(--text);
+}
+
+.btn-icon {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+.btn-icon:hover:not(:disabled) {
+  border-color: var(--border-hover);
+  color: var(--text);
+}
+
+.btn-icon.outlook-btn {
+  color: var(--outlook);
+  border-color: var(--outlook-soft);
+  background: var(--outlook-soft);
+}
+
+.btn-icon.outlook-btn:hover:not(:disabled) { border-color: var(--outlook); }
+
+/* ── Elaborate Empty ───────────────────────────────────────────── */
+.elab-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  gap: 16px;
+  padding: 40px;
+  text-align: center;
+}
+
+.elab-empty-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(99,102,241,0.2);
+}
+
+.elab-empty h3 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.elab-empty p {
+  font-size: 13px;
+  color: var(--text-muted);
+  max-width: 260px;
+  line-height: 1.6;
+}
+
+.btn-elaborate {
+  padding: 12px 28px;
+  background: linear-gradient(135deg, var(--accent), var(--outlook));
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: var(--radius);
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: opacity var(--transition), transform 0.1s ease;
+  animation: pulse 2.4s ease-in-out infinite;
+}
+
+.btn-elaborate:hover:not(:disabled) { opacity: 0.88; animation: none; }
+.btn-elaborate:active:not(:disabled) { transform: scale(0.97); }
+.btn-elaborate:disabled { opacity: 0.5; cursor: not-allowed; animation: none; }
+
+@keyframes pulse {
+  0%,100% { box-shadow: 0 0 0 0 rgba(99,102,241,0); }
+  50%      { box-shadow: 0 0 0 10px rgba(99,102,241,0.15); }
+}
+
+/* ── Elaboration Result ────────────────────────────────────────── */
+.elab-result {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+  padding: 14px;
+  gap: 10px;
+}
+
+.elab-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.elab-updated {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.elab-header-actions { display: flex; gap: 6px; }
+
+.elab-table-wrap {
+  flex: 1;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+}
+
+.elab-table-wrap::-webkit-scrollbar { width: 4px; }
+.elab-table-wrap::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+table.ts-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.ts-table colgroup col:nth-child(1) { width: 28%; }
+.ts-table colgroup col:nth-child(2) { width: 13%; }
+.ts-table colgroup col:nth-child(3) { width: 59%; }
+
+.ts-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-panel);
+  z-index: 1;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 10px 14px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.ts-table tbody tr {
+  border-bottom: 1px solid var(--border);
+  transition: background var(--transition);
+}
+
+.ts-table tbody tr:last-child { border-bottom: none; }
+.ts-table tbody tr:hover { background: var(--bg-card-hover); }
+
+.ts-table td {
+  padding: 9px 14px;
+  font-size: 13px;
+  color: var(--text);
+  vertical-align: middle;
+}
+
+.ts-table td.editable {
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+
+.ts-table td.editable:hover {
+  background: var(--accent-soft);
+  color: var(--accent-hover);
+}
+
+/* ── Description cell: copy on click, edit via button ── */
+.ts-table td.desc-td { padding: 0; }
+
+.desc-cell {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 9px 14px;
+}
+
+.desc-text {
+  flex: 1;
+  cursor: copy;
+  border-radius: 4px;
+  padding: 2px 5px;
+  margin: -2px -5px;
+  transition: background var(--transition), color var(--transition);
+  line-height: 1.45;
+}
+
+.desc-text:hover {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.desc-text.copied {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.desc-edit-btn {
+  flex-shrink: 0;
+  opacity: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 3px 4px;
+  border-radius: 5px;
+  transition: opacity var(--transition), color var(--transition), background var(--transition);
+  display: flex;
+  align-items: center;
+}
+
+.ts-table tbody tr:hover .desc-edit-btn { opacity: 1; }
+
+.desc-edit-btn:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.ts-table td input.inline-input {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 4px 8px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.practice-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.practice-code {
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: 2px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.practice-name-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ts-table tfoot tr { background: var(--bg-card); }
+
+.ts-table tfoot td {
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  border-top: 2px solid var(--border);
+}
+
+.total-ok { color: var(--success); }
+.total-ko { color: var(--error); }
+
+.elab-note {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 8px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+  line-height: 1.5;
+}
+
+/* ── Practices Modal ───────────────────────────────────────────── */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: fadeIn 0.18s ease;
+}
+
+.modal-backdrop.hidden { display: none; }
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.modal {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  width: 100%;
+  max-width: 560px;
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--shadow);
+  animation: slideUp 0.2s ease;
+}
+
+@keyframes slideUp {
+  from { transform: translateY(16px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.modal-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.modal-body::-webkit-scrollbar { width: 4px; }
+.modal-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+.modal-footer {
+  padding: 14px 16px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.modal-footer-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+
+.practice-form {
+  display: grid;
+  grid-template-columns: 90px 1fr 1fr;
+  gap: 8px;
+}
+
+@media (max-width: 500px) { .practice-form { grid-template-columns: 1fr; } }
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.form-field label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.form-field input {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+  transition: border-color var(--transition);
+}
+
+.form-field input:focus { border-color: var(--accent); }
+
+.practice-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  transition: border-color var(--transition);
+  flex-direction: column;
+}
+
+.practice-row-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.practice-row:hover { border-color: var(--border-hover); }
+
+.practice-row-code {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: 2px 7px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.practice-row-info { flex: 1; min-width: 0; }
+
+.practice-row-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.practice-row-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.practice-row-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.practice-edit-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 6px;
+  width: 100%;
+  align-items: center;
+}
+
+.practice-edit-form input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+  transition: border-color var(--transition);
+}
+
+.practice-edit-form input:focus { border-color: var(--accent); }
+
+/* ── Toasts ────────────────────────────────────────────────────── */
+.toast-container {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 500;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  pointer-events: auto;
+  max-width: 320px;
+  animation: toastIn 0.22s ease both;
+  color: var(--text);
+}
+
+.toast.fade-out { animation: toastOut 0.3s ease both; }
+
+@keyframes toastIn {
+  from { transform: translateX(20px); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+
+@keyframes toastOut {
+  from { transform: translateX(0);    opacity: 1; }
+  to   { transform: translateX(20px); opacity: 0; }
+}
+
+.toast-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.toast.success .toast-dot { background: var(--success); }
+.toast.error   .toast-dot { background: var(--error); }
+.toast.info    .toast-dot { background: var(--accent); }
+
+/* ── Spinner ───────────────────────────────────────────────────── */
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255,255,255,0.25);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Utils ─────────────────────────────────────────────────────── */
+.hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<div class="app-layout">
+
+  <!-- ══ Header ════════════════════════════════════════════════ -->
+  <header class="header">
+    <div class="header-brand">
+      <div class="header-logo">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+        </svg>
+      </div>
+      <span class="header-title">TimeSheet</span>
+    </div>
+
+    <div class="header-center">
+      <span class="header-date" id="headerDate"></span>
+      <span class="header-time" id="headerTime"></span>
+    </div>
+
+    <div class="header-actions">
+      <div class="user-badge" id="userBadge" title="">?</div>
+      <button class="icon-btn" id="themeToggle" title="Cambia tema" aria-label="Cambia tema">
+        <svg id="iconMoon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+        </svg>
+        <svg id="iconSun" class="hidden" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="5"/>
+          <line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/>
+          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+          <line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/>
+          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+        </svg>
+      </button>
+      <button class="icon-btn" id="settingsBtn" title="Gestione pratiche" aria-label="Gestione pratiche">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ══ Main ══════════════════════════════════════════════════ -->
+  <main class="main">
+
+    <!-- Left: Attività ───────────────────────────────────────── -->
+    <section class="panel panel-left">
+      <div class="panel-header">
+        <span class="panel-title">Attività</span>
+        <span class="panel-meta" id="entryCount">0 voci</span>
+      </div>
+
+      <div class="entry-list" id="entryList">
+        <!-- Entry cards rendered here -->
+        <div class="empty-state" id="entryEmptyState">
+          <div class="empty-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="color:var(--text-muted)">
+              <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+            </svg>
+          </div>
+          <p>Nessuna attività ancora.<br>Inizia a registrare la tua giornata.</p>
+        </div>
+      </div>
+
+      <div class="composer">
+        <div class="composer-inner">
+          <textarea class="composer-textarea" id="composerTextarea"
+            placeholder="Cosa hai fatto?..." rows="2"></textarea>
+          <div class="composer-footer">
+            <span class="composer-hint">↵ Invia &nbsp;·&nbsp; ⇧↵ A capo</span>
+            <div class="composer-btns">
+              <button class="btn btn-icon outlook-btn" id="outlookBtn"
+                title="Importa riunioni da Outlook" aria-label="Importa da Outlook" disabled>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/>
+                  <line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+                  <line x1="8" y1="14" x2="16" y2="14"/>
+                </svg>
+              </button>
+              <button class="btn btn-primary" id="sendBtn" title="Invia (Invio)" aria-label="Invia attività">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Right: Timesheet ─────────────────────────────────────── -->
+    <section class="panel panel-right" id="rightPanel">
+      <div class="panel-header">
+        <span class="panel-title">Timesheet</span>
+        <span class="panel-meta" id="elabMeta"></span>
+      </div>
+
+      <!-- Empty / CTA -->
+      <div class="elab-empty" id="elabEmpty">
+        <div class="elab-empty-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent)">
+            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+          </svg>
+        </div>
+        <h3>Elabora le attività</h3>
+        <p>Usa l'AI per analizzare le attività registrate e generare automaticamente il timesheet del giorno.</p>
+        <button class="btn-elaborate" id="elaborateBtn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+          </svg>
+          Elabora
+        </button>
+      </div>
+
+      <!-- Result -->
+      <div class="elab-result hidden" id="elabResult">
+        <div class="elab-header-row">
+          <span class="elab-updated" id="elabUpdatedAt"></span>
+          <div class="elab-header-actions">
+            <button class="btn btn-secondary" id="copyJsonBtn" style="font-size:12px;padding:5px 11px;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+              </svg>
+              Copia JSON
+            </button>
+            <button class="btn btn-secondary" id="reElaborateBtn" style="font-size:12px;padding:5px 11px;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="23 4 23 10 17 10"/>
+                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+              </svg>
+              Elabora di nuovo
+            </button>
+          </div>
+        </div>
+
+        <div class="elab-table-wrap">
+          <table class="ts-table" id="tsTable">
+            <colgroup><col/><col/><col/></colgroup>
+            <thead>
+              <tr>
+                <th>Pratica</th>
+                <th>Ore</th>
+                <th>Descrizione</th>
+              </tr>
+            </thead>
+            <tbody id="tsBody"></tbody>
+            <tfoot>
+              <tr>
+                <td style="color:var(--text-muted);font-size:11px;font-weight:400;">Totale</td>
+                <td id="tsTotal"></td>
+                <td></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+
+        <p class="elab-note hidden" id="elabNote"></p>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ══ Practices Modal ═══════════════════════════════════════════ -->
+<div class="modal-backdrop hidden" id="practicesModal"
+  role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+  <div class="modal">
+    <div class="modal-head">
+      <span class="modal-title" id="modalTitle">Gestione Pratiche</span>
+      <button class="icon-btn" id="closePracticesBtn" aria-label="Chiudi">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+    <div class="modal-body" id="practicesList"></div>
+    <div class="modal-footer">
+      <div class="modal-footer-label">Aggiungi pratica</div>
+      <div class="practice-form">
+        <div class="form-field">
+          <label for="newCode">Codice</label>
+          <input type="text" id="newCode" placeholder="6448">
+        </div>
+        <div class="form-field">
+          <label for="newName">Nome</label>
+          <input type="text" id="newName" placeholder="Sistemistica">
+        </div>
+        <div class="form-field">
+          <label for="newDesc">Descrizione</label>
+          <input type="text" id="newDesc" placeholder="Opzionale">
+        </div>
+      </div>
+      <div style="margin-top:10px; text-align:right;">
+        <button class="btn btn-primary" id="addPracticeBtn" style="font-size:13px;padding:8px 16px;">
+          Aggiungi
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ Toast Container ═══════════════════════════════════════════ -->
+<div class="toast-container" id="toastContainer" aria-live="polite" aria-atomic="false"></div>
+
+<!-- ══ Application Script ════════════════════════════════════════ -->
+<script>
+(function () {
+  'use strict';
+
+  /* ── State ──────────────────────────────────────────────────── */
+  const state = {
+    config: {},
+    entries: [],
+    elaboration: null,
+    practices: [],
+    confirmDelete: null,
+    confirmDeletePractice: null,
+  };
+
+  /* ── Security: XSS escaping ─────────────────────────────────── */
+  function escHtml(str) {
+    if (str == null) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  /* ── Formatters ─────────────────────────────────────────────── */
+  function fmtTime(val) {
+    if (!val) return '';
+    try {
+      const d = new Date(val);
+      if (isNaN(d.getTime())) return String(val);
+      return d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+    } catch (_) { return String(val); }
+  }
+
+  function fmtOre(val) {
+    const n = parseFloat(val);
+    if (isNaN(n)) return '—';
+    const s = n.toFixed(2);
+    return s.endsWith('.00') ? String(Math.round(n)) : s.replace(/0$/, '');
+  }
+
+  function todayISO() {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  /* ── Clock ──────────────────────────────────────────────────── */
+  const DAYS   = ['Domenica','Lunedì','Martedì','Mercoledì','Giovedì','Venerdì','Sabato'];
+  const MONTHS = ['gennaio','febbraio','marzo','aprile','maggio','giugno',
+                  'luglio','agosto','settembre','ottobre','novembre','dicembre'];
+
+  function tickClock() {
+    const now = new Date();
+    document.getElementById('headerDate').textContent =
+      DAYS[now.getDay()] + ' ' + now.getDate() + ' ' + MONTHS[now.getMonth()] + ' ' + now.getFullYear();
+    document.getElementById('headerTime').textContent =
+      now.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
+
+  /* ── Theme ──────────────────────────────────────────────────── */
+  function applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    document.getElementById('iconMoon').classList.toggle('hidden', theme === 'light');
+    document.getElementById('iconSun').classList.toggle('hidden',  theme === 'dark');
+    localStorage.setItem('ts-theme', theme);
+  }
+
+  /* ── Toasts ─────────────────────────────────────────────────── */
+  function showToast(msg, type) {
+    type = type || 'info';
+    const c = document.getElementById('toastContainer');
+    const el = document.createElement('div');
+    el.className = 'toast ' + type;
+    const dot = document.createElement('div');
+    dot.className = 'toast-dot';
+    const txt = document.createElement('span');
+    txt.textContent = String(msg);
+    el.appendChild(dot);
+    el.appendChild(txt);
+    c.appendChild(el);
+    setTimeout(function () {
+      el.classList.add('fade-out');
+      el.addEventListener('animationend', function () { el.remove(); }, { once: true });
+    }, 3500);
+  }
+
+  /* ── API Fetch wrapper ──────────────────────────────────────── */
+  function apiFetch(url, opts) {
+    opts = opts || {};
+    return fetch(url, Object.assign({
+      headers: Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {}),
+    }, opts)).then(function (res) {
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.json();
+    });
+  }
+
+  /* ── Init ───────────────────────────────────────────────────── */
+  function init() {
+    tickClock();
+    setInterval(tickClock, 1000);
+
+    applyTheme(localStorage.getItem('ts-theme') || 'dark');
+
+    Promise.all([
+      apiFetch('/api/config'),
+      apiFetch('/api/entries'),
+      apiFetch('/api/elaborate').catch(function () { return null; }),
+      apiFetch('/api/practices').catch(function () { return null; }),
+    ]).then(function (results) {
+      const cfg       = results[0] || {};
+      const entData   = results[1] || {};
+      const elabData  = results[2];
+      const pracData  = results[3];
+
+      state.config    = cfg;
+      state.entries   = (entData.entries) || [];
+      state.practices = (pracData && pracData.practices) || [];
+
+      if (elabData && elabData.result) {
+        state.elaboration = elabData;
+      }
+
+      const badge = document.getElementById('userBadge');
+      const name  = cfg.user_name || '';
+      badge.textContent = name ? name.charAt(0).toUpperCase() : '?';
+      badge.title = name || 'Utente';
+
+      if (cfg.outlook_available) {
+        document.getElementById('outlookBtn').disabled = false;
+      }
+
+      renderEntries();
+      renderElaboration();
+    }).catch(function () {
+      showToast('Errore durante il caricamento iniziale.', 'error');
+      renderEntries();
+      renderElaboration();
+    });
+
+    bindEvents();
+  }
+
+  /* ── Render Entries ─────────────────────────────────────────── */
+  function renderEntries() {
+    var list  = document.getElementById('entryList');
+    var empty = document.getElementById('entryEmptyState');
+    var count = document.getElementById('entryCount');
+
+    // Remove previous cards
+    var cards = list.querySelectorAll('.entry-card');
+    for (var i = 0; i < cards.length; i++) { cards[i].remove(); }
+
+    var n = state.entries.length;
+    count.textContent = n + (n === 1 ? ' voce' : ' voci');
+
+    if (n === 0) {
+      empty.classList.remove('hidden');
+      return;
+    }
+    empty.classList.add('hidden');
+
+    state.entries.forEach(function (entry) {
+      list.appendChild(buildEntryCard(entry));
+    });
+  }
+
+  function buildEntryCard(entry) {
+    var isOutlook = entry.type === 'outlook';
+
+    var card = document.createElement('div');
+    card.className = 'entry-card';
+    card.dataset.id = entry.id;
+
+    // Top row
+    var top = document.createElement('div');
+    top.className = 'entry-card-top';
+
+    var badge = document.createElement('span');
+    badge.className = 'badge ' + (isOutlook ? 'badge-outlook' : 'badge-activity');
+    badge.textContent = isOutlook ? 'Outlook' : 'Attività';
+    top.appendChild(badge);
+
+    if (entry.duration_min && entry.duration_min > 0) {
+      var dur = document.createElement('span');
+      dur.className = 'entry-duration';
+      dur.textContent = entry.duration_min + ' min';
+      top.appendChild(dur);
+    }
+
+    var timeEl = document.createElement('span');
+    timeEl.className = 'entry-time';
+    timeEl.textContent = fmtTime(entry.time);
+    top.appendChild(timeEl);
+    card.appendChild(top);
+
+    // Text
+    var textEl = document.createElement('div');
+    textEl.className = 'entry-text';
+    textEl.textContent = entry.text;
+    card.appendChild(textEl);
+
+    // Actions
+    var actions = document.createElement('div');
+    actions.className = 'entry-actions';
+
+    var editBtn = document.createElement('button');
+    editBtn.className = 'entry-btn';
+    editBtn.title = 'Modifica';
+    editBtn.setAttribute('aria-label', 'Modifica');
+    editBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+    editBtn.addEventListener('click', function () { startEditEntry(card, entry, textEl); });
+    actions.appendChild(editBtn);
+
+    var delBtn = document.createElement('button');
+    delBtn.className = 'entry-btn';
+    delBtn.title = 'Elimina';
+    delBtn.setAttribute('aria-label', 'Elimina');
+    delBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
+    delBtn.addEventListener('click', function () { handleDeleteEntry(entry.id, delBtn); });
+    actions.appendChild(delBtn);
+
+    card.appendChild(actions);
+    return card;
+  }
+
+  function startEditEntry(card, entry, textEl) {
+    if (card.querySelector('.entry-edit-input')) return;
+    var ta = document.createElement('textarea');
+    ta.className = 'entry-edit-input';
+    ta.value = entry.text;
+    ta.rows = 2;
+    textEl.replaceWith(ta);
+    ta.focus();
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+
+    var committed = false;
+    function commit() {
+      if (committed) return;
+      var newText = ta.value.trim();
+      if (!newText || newText === entry.text) { ta.replaceWith(textEl); return; }
+      committed = true;
+      doEditEntry(entry.id, newText, ta, textEl);
+    }
+
+    ta.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); commit(); }
+      if (e.key === 'Escape') { ta.replaceWith(textEl); committed = true; }
+    });
+    ta.addEventListener('blur', commit);
+  }
+
+  /* ── Entry API Calls ────────────────────────────────────────── */
+  function addEntry(text) {
+    var btn = document.getElementById('sendBtn');
+    var orig = btn.innerHTML;
+    btn.innerHTML = '<span class="spinner"></span>';
+    btn.disabled = true;
+
+    apiFetch('/api/entry', { method: 'POST', body: JSON.stringify({ text: text }) })
+      .then(function (data) {
+        if (data.success && data.entry) {
+          state.entries = state.entries.concat([data.entry]);
+          renderEntries();
+          var list = document.getElementById('entryList');
+          list.scrollTop = list.scrollHeight;
+        } else {
+          showToast('Errore nell\'aggiunta dell\'attività.', 'error');
+        }
+      })
+      .catch(function () { showToast('Impossibile aggiungere l\'attività.', 'error'); })
+      .finally(function () { btn.disabled = false; btn.innerHTML = orig; });
+  }
+
+  function handleDeleteEntry(id, btn) {
+    if (state.confirmDelete === id) {
+      state.confirmDelete = null;
+      doDeleteEntry(id);
+    } else {
+      if (state.confirmDelete !== null) {
+        var prev = document.querySelector('.entry-card[data-id="' + state.confirmDelete + '"] .entry-btn.danger');
+        if (prev) prev.classList.remove('danger');
+      }
+      state.confirmDelete = id;
+      btn.classList.add('danger');
+      btn.title = 'Clicca ancora per confermare';
+      setTimeout(function () {
+        if (state.confirmDelete === id) {
+          state.confirmDelete = null;
+          btn.classList.remove('danger');
+          btn.title = 'Elimina';
+        }
+      }, 2500);
+    }
+  }
+
+  function doDeleteEntry(id) {
+    apiFetch('/api/entry/' + id, { method: 'DELETE' })
+      .then(function (data) {
+        if (data.success) {
+          state.entries = state.entries.filter(function (e) { return e.id !== id; });
+          renderEntries();
+        } else {
+          showToast('Errore nell\'eliminazione.', 'error');
+        }
+      })
+      .catch(function () { showToast('Impossibile eliminare l\'attività.', 'error'); });
+  }
+
+  function doEditEntry(id, newText, ta, textEl) {
+    apiFetch('/api/entry/' + id, { method: 'PUT', body: JSON.stringify({ text: newText }) })
+      .then(function (data) {
+        if (data.success && data.entry) {
+          state.entries = state.entries.map(function (e) { return e.id === id ? data.entry : e; });
+          renderEntries();
+        } else {
+          ta.replaceWith(textEl);
+          showToast('Errore nella modifica.', 'error');
+        }
+      })
+      .catch(function () { ta.replaceWith(textEl); showToast('Impossibile modificare.', 'error'); });
+  }
+
+  /* ── Outlook ────────────────────────────────────────────────── */
+  function importOutlook() {
+    var btn = document.getElementById('outlookBtn');
+    var orig = btn.innerHTML;
+    btn.innerHTML = '<span class="spinner" style="border-color:rgba(139,92,246,0.3);border-top-color:var(--outlook);"></span>';
+    btn.disabled = true;
+
+    apiFetch('/api/outlook', { method: 'POST' })
+      .then(function (data) {
+        if (data.success) {
+          var n = data.new || 0;
+          var s = data.skipped || 0;
+          showToast(n + ' nuov' + (n === 1 ? 'a' : 'e') + ' riunion' + (n === 1 ? 'e' : 'i') +
+                    ', ' + s + ' già importat' + (s === 1 ? 'a' : 'e') + '.', 'success');
+          return apiFetch('/api/entries');
+        }
+        showToast('Errore durante l\'importazione da Outlook.', 'error');
+        return null;
+      })
+      .then(function (entData) {
+        if (entData && entData.entries) {
+          state.entries = entData.entries;
+          renderEntries();
+        }
+      })
+      .catch(function () { showToast('Impossibile importare da Outlook.', 'error'); })
+      .finally(function () { btn.innerHTML = orig; btn.disabled = !state.config.outlook_available; });
+  }
+
+  /* ── Elaborate ──────────────────────────────────────────────── */
+  function elaborate(btn) {
+    var origHTML = btn.innerHTML;
+    btn.innerHTML = '<span class="spinner"></span><span>Elaborazione in corso...</span>';
+    btn.disabled = true;
+
+    apiFetch('/api/elaborate', { method: 'POST' })
+      .then(function (data) {
+        if (data.success && data.result) {
+          state.elaboration = data;
+          renderElaboration();
+          showToast('Timesheet generato con successo.', 'success');
+        } else {
+          showToast('Errore durante l\'elaborazione.', 'error');
+        }
+      })
+      .catch(function () { showToast('Impossibile elaborare le attività.', 'error'); })
+      .finally(function () { btn.innerHTML = origHTML; btn.disabled = false; });
+  }
+
+  /* ── Render Elaboration ─────────────────────────────────────── */
+  function renderElaboration() {
+    var empty  = document.getElementById('elabEmpty');
+    var result = document.getElementById('elabResult');
+
+    if (!state.elaboration || !state.elaboration.result) {
+      empty.classList.remove('hidden');
+      result.classList.add('hidden');
+      document.getElementById('elabMeta').textContent = '';
+      return;
+    }
+
+    empty.classList.add('hidden');
+    result.classList.remove('hidden');
+
+    var r  = state.elaboration.result;
+    var ts = r.timesheet || [];
+
+    document.getElementById('elabMeta').textContent = ts.length + ' rig' + (ts.length === 1 ? 'a' : 'he');
+
+    var upAt = state.elaboration.elaborated_at;
+    document.getElementById('elabUpdatedAt').textContent = upAt ? 'Ultimo aggiornamento ' + fmtTime(upAt) : '';
+
+    renderTsBody(ts);
+
+    var noteEl = document.getElementById('elabNote');
+    if (r.note) {
+      noteEl.textContent = r.note;
+      noteEl.classList.remove('hidden');
+    } else {
+      noteEl.classList.add('hidden');
+    }
+  }
+
+  function renderTsBody(rows) {
+    var tbody = document.getElementById('tsBody');
+    tbody.innerHTML = '';
+
+    rows.forEach(function (row, idx) {
+      var tr = document.createElement('tr');
+
+      // Pratica cell
+      var tdP = document.createElement('td');
+      var wrap = document.createElement('div');
+      wrap.className = 'practice-badge';
+      var codeEl = document.createElement('span');
+      codeEl.className = 'practice-code';
+      codeEl.textContent = String(row.pratica || '');
+      wrap.appendChild(codeEl);
+      var nameEl = document.createElement('span');
+      nameEl.className = 'practice-name-label';
+      var prac = state.practices.find(function (p) { return p.code === String(row.pratica); });
+      nameEl.textContent = prac ? prac.name : '';
+      nameEl.title = prac ? (prac.name + (prac.description ? ' — ' + prac.description : '')) : '';
+      wrap.appendChild(nameEl);
+      tdP.appendChild(wrap);
+      tr.appendChild(tdP);
+
+      // Ore cell (editable)
+      var tdO = document.createElement('td');
+      tdO.className = 'editable';
+      tdO.textContent = fmtOre(row.ore);
+      tdO.addEventListener('click', function () { startTableEdit(tdO, idx, 'ore'); });
+      tr.appendChild(tdO);
+
+      // Descrizione cell — click text = copia, bottone matita = modifica
+      var tdD = document.createElement('td');
+      tdD.className = 'desc-td';
+
+      var descWrap = document.createElement('div');
+      descWrap.className = 'desc-cell';
+
+      var descText = document.createElement('span');
+      descText.className = 'desc-text';
+      descText.textContent = row.descrizione || '';
+      descText.title = 'Clicca per copiare';
+      (function (capturedIdx, capturedDescText) {
+        capturedDescText.addEventListener('click', function () {
+          if (capturedDescText.querySelector('input')) return;
+          var txt = state.elaboration.result.timesheet[capturedIdx].descrizione || '';
+          navigator.clipboard.writeText(txt).then(function () {
+            capturedDescText.classList.add('copied');
+            capturedDescText.title = 'Copiato!';
+            setTimeout(function () {
+              capturedDescText.classList.remove('copied');
+              capturedDescText.title = 'Clicca per copiare';
+            }, 1200);
+          }).catch(function () { showToast('Impossibile copiare', 'error'); });
+        });
+      })(idx, descText);
+      descWrap.appendChild(descText);
+
+      var descEditBtn = document.createElement('button');
+      descEditBtn.className = 'desc-edit-btn';
+      descEditBtn.title = 'Modifica descrizione';
+      descEditBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+      (function (capturedIdx, capturedTd, capturedDescText) {
+        descEditBtn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          startDescEdit(capturedTd, capturedDescText, capturedIdx);
+        });
+      })(idx, tdD, descText);
+      descWrap.appendChild(descEditBtn);
+
+      tdD.appendChild(descWrap);
+      tr.appendChild(tdD);
+
+      tbody.appendChild(tr);
+    });
+
+    updateTotal();
+  }
+
+  function startTableEdit(td, idx, field) {
+    if (td.querySelector('input')) return;
+
+    var cur = state.elaboration.result.timesheet[idx];
+    var curVal = field === 'ore' ? (cur.ore != null ? cur.ore : '') : (cur.descrizione || '');
+
+    var input = document.createElement('input');
+    input.className = 'inline-input';
+    if (field === 'ore') {
+      input.type = 'number';
+      input.step = '0.25';
+      input.min = '0.25';
+      input.value = String(curVal);
+    } else {
+      input.type = 'text';
+      input.value = String(curVal);
+    }
+    td.textContent = '';
+    td.appendChild(input);
+    input.focus();
+    input.select();
+
+    var committed = false;
+
+    function commitTableEdit() {
+      if (committed) return;
+      committed = true;
+      var val;
+      if (field === 'ore') {
+        val = parseFloat(input.value);
+        if (isNaN(val) || val <= 0) { td.textContent = fmtOre(curVal); return; }
+      } else {
+        val = input.value.trim();
+      }
+      // Immutable update
+      var newTs = state.elaboration.result.timesheet.map(function (r, i) {
+        if (i !== idx) return r;
+        var updated = Object.assign({}, r);
+        updated[field] = val;
+        return updated;
+      });
+      state.elaboration = Object.assign({}, state.elaboration, {
+        result: Object.assign({}, state.elaboration.result, { timesheet: newTs }),
+      });
+      td.textContent = field === 'ore' ? fmtOre(val) : (val || '');
+      updateTotal();
+    }
+
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter')  { e.preventDefault(); commitTableEdit(); }
+      if (e.key === 'Escape') { committed = true; td.textContent = field === 'ore' ? fmtOre(curVal) : String(curVal); }
+    });
+    input.addEventListener('blur', commitTableEdit);
+  }
+
+  /* Inline edit specifico per la cella descrizione (mantiene la struttura .desc-cell) */
+  function startDescEdit(tdD, descText, idx) {
+    if (tdD.querySelector('input')) return;
+
+    var cur = state.elaboration.result.timesheet[idx];
+    var curVal = cur.descrizione || '';
+
+    var input = document.createElement('input');
+    input.className = 'inline-input';
+    input.type = 'text';
+    input.value = curVal;
+    input.style.width = '100%';
+
+    descText.textContent = '';
+    descText.style.cursor = 'text';
+    descText.appendChild(input);
+    input.focus();
+    input.select();
+
+    var committed = false;
+
+    function commitDescEdit() {
+      if (committed) return;
+      committed = true;
+      var val = input.value.trim();
+      var newTs = state.elaboration.result.timesheet.map(function (r, i) {
+        if (i !== idx) return r;
+        return Object.assign({}, r, { descrizione: val });
+      });
+      state.elaboration = Object.assign({}, state.elaboration, {
+        result: Object.assign({}, state.elaboration.result, { timesheet: newTs }),
+      });
+      descText.textContent = val;
+      descText.style.cursor = '';
+      descText.title = 'Clicca per copiare';
+    }
+
+    function cancelDescEdit() {
+      if (committed) return;
+      committed = true;
+      descText.textContent = curVal;
+      descText.style.cursor = '';
+    }
+
+    input.addEventListener('blur', commitDescEdit);
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter')  { e.preventDefault(); commitDescEdit(); }
+      if (e.key === 'Escape') { e.preventDefault(); cancelDescEdit(); }
+    });
+  }
+
+  function updateTotal() {
+    var ts = (state.elaboration && state.elaboration.result && state.elaboration.result.timesheet) || [];
+    var total = ts.reduce(function (acc, r) { return acc + (parseFloat(r.ore) || 0); }, 0);
+    var rounded = Math.round(total * 100) / 100;
+    var el = document.getElementById('tsTotal');
+    el.textContent = fmtOre(rounded);
+    el.className = Math.abs(rounded - 8) < 0.001 ? 'total-ok' : 'total-ko';
+  }
+
+  /* ── Copy JSON ──────────────────────────────────────────────── */
+  function copyJson() {
+    if (!state.elaboration || !state.elaboration.result) return;
+    var ts = state.elaboration.result.timesheet || [];
+    var total = ts.reduce(function (acc, r) { return acc + (parseFloat(r.ore) || 0); }, 0);
+    var payload = {
+      data: todayISO(),
+      utente: state.config.user_name || '',
+      timesheet: ts.map(function (r) {
+        return { pratica: r.pratica, ore: parseFloat(r.ore) || 0, descrizione: r.descrizione || '' };
+      }),
+      totale_ore: Math.round(total * 100) / 100,
+    };
+
+    var btn = document.getElementById('copyJsonBtn');
+    var orig = btn.innerHTML;
+
+    navigator.clipboard.writeText(JSON.stringify(payload, null, 2))
+      .then(function () {
+        btn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Copiato!';
+        btn.style.color = 'var(--success)';
+        setTimeout(function () { btn.innerHTML = orig; btn.style.color = ''; }, 2200);
+      })
+      .catch(function () { showToast('Impossibile copiare negli appunti.', 'error'); });
+  }
+
+  /* ── Practices Modal ────────────────────────────────────────── */
+  function openPractices() {
+    document.getElementById('practicesModal').classList.remove('hidden');
+    apiFetch('/api/practices')
+      .then(function (data) {
+        state.practices = (data && data.practices) || [];
+        renderPractices();
+      })
+      .catch(function () { showToast('Impossibile caricare le pratiche.', 'error'); });
+  }
+
+  function closePractices() {
+    document.getElementById('practicesModal').classList.add('hidden');
+    state.confirmDeletePractice = null;
+  }
+
+  function renderPractices() {
+    var list = document.getElementById('practicesList');
+    list.innerHTML = '';
+
+    if (state.practices.length === 0) {
+      var empty = document.createElement('div');
+      empty.className = 'empty-state';
+      empty.style.minHeight = '80px';
+      var p = document.createElement('p');
+      p.textContent = 'Nessuna pratica configurata.';
+      empty.appendChild(p);
+      list.appendChild(empty);
+      return;
+    }
+
+    state.practices.forEach(function (p) {
+      list.appendChild(buildPracticeRow(p));
+    });
+  }
+
+  function buildPracticeRow(p) {
+    var row = document.createElement('div');
+    row.className = 'practice-row';
+    row.dataset.code = p.code;
+
+    var top = document.createElement('div');
+    top.className = 'practice-row-top';
+
+    var codeEl = document.createElement('span');
+    codeEl.className = 'practice-row-code';
+    codeEl.textContent = p.code;
+    top.appendChild(codeEl);
+
+    var info = document.createElement('div');
+    info.className = 'practice-row-info';
+    var nameEl = document.createElement('div');
+    nameEl.className = 'practice-row-name';
+    nameEl.textContent = p.name;
+    var descEl = document.createElement('div');
+    descEl.className = 'practice-row-desc';
+    descEl.textContent = p.description || '';
+    info.appendChild(nameEl);
+    info.appendChild(descEl);
+    top.appendChild(info);
+
+    var actns = document.createElement('div');
+    actns.className = 'practice-row-actions';
+
+    var editBtn = document.createElement('button');
+    editBtn.className = 'entry-btn';
+    editBtn.title = 'Modifica';
+    editBtn.setAttribute('aria-label', 'Modifica pratica ' + escHtml(p.code));
+    editBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+    editBtn.addEventListener('click', function () { startEditPractice(row, p, nameEl, descEl); });
+    actns.appendChild(editBtn);
+
+    var delBtn = document.createElement('button');
+    delBtn.className = 'entry-btn';
+    delBtn.title = 'Elimina';
+    delBtn.setAttribute('aria-label', 'Elimina pratica ' + escHtml(p.code));
+    delBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
+    delBtn.addEventListener('click', function () { handleDeletePractice(p.code, delBtn); });
+    actns.appendChild(delBtn);
+
+    top.appendChild(actns);
+    row.appendChild(top);
+    return row;
+  }
+
+  function startEditPractice(row, p, nameEl, descEl) {
+    if (row.querySelector('.practice-edit-form')) return;
+
+    var form = document.createElement('div');
+    form.className = 'practice-edit-form';
+
+    var nameIn = document.createElement('input');
+    nameIn.type = 'text';
+    nameIn.value = p.name;
+    nameIn.placeholder = 'Nome';
+
+    var descIn = document.createElement('input');
+    descIn.type = 'text';
+    descIn.value = p.description || '';
+    descIn.placeholder = 'Descrizione';
+
+    var saveBtn = document.createElement('button');
+    saveBtn.className = 'btn btn-primary';
+    saveBtn.style.fontSize = '12px';
+    saveBtn.style.padding = '6px 12px';
+    saveBtn.textContent = 'Salva';
+
+    form.appendChild(nameIn);
+    form.appendChild(descIn);
+    form.appendChild(saveBtn);
+    row.appendChild(form);
+    nameIn.focus();
+
+    function doSave() {
+      var name = nameIn.value.trim();
+      var desc = descIn.value.trim();
+      if (!name) { showToast('Il nome è obbligatorio.', 'error'); return; }
+      doUpdatePractice(p.code, name, desc, form, nameEl, descEl);
+    }
+
+    saveBtn.addEventListener('click', doSave);
+    form.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') doSave();
+      if (e.key === 'Escape') form.remove();
+    });
+  }
+
+  function handleDeletePractice(code, btn) {
+    if (state.confirmDeletePractice === code) {
+      state.confirmDeletePractice = null;
+      doDeletePractice(code);
+    } else {
+      if (state.confirmDeletePractice !== null) {
+        var prev = document.querySelector('.practice-row[data-code="' + state.confirmDeletePractice + '"] .entry-btn.danger');
+        if (prev) prev.classList.remove('danger');
+      }
+      state.confirmDeletePractice = code;
+      btn.classList.add('danger');
+      btn.title = 'Clicca ancora per confermare';
+      setTimeout(function () {
+        if (state.confirmDeletePractice === code) {
+          state.confirmDeletePractice = null;
+          btn.classList.remove('danger');
+          btn.title = 'Elimina';
+        }
+      }, 2500);
+    }
+  }
+
+  function doAddPractice() {
+    var code = document.getElementById('newCode').value.trim();
+    var name = document.getElementById('newName').value.trim();
+    var desc = document.getElementById('newDesc').value.trim();
+    if (!code || !name) { showToast('Codice e nome sono obbligatori.', 'error'); return; }
+
+    apiFetch('/api/practices', { method: 'POST', body: JSON.stringify({ code: code, name: name, description: desc }) })
+      .then(function (data) {
+        if (data.success) {
+          state.practices = data.practices || [];
+          renderPractices();
+          document.getElementById('newCode').value = '';
+          document.getElementById('newName').value = '';
+          document.getElementById('newDesc').value = '';
+          showToast('Pratica aggiunta.', 'success');
+        } else {
+          showToast('Errore nell\'aggiunta della pratica.', 'error');
+        }
+      })
+      .catch(function () { showToast('Impossibile aggiungere la pratica.', 'error'); });
+  }
+
+  function doUpdatePractice(code, name, desc, formEl, nameEl, descEl) {
+    apiFetch('/api/practices/' + encodeURIComponent(code), {
+      method: 'PUT',
+      body: JSON.stringify({ name: name, description: desc }),
+    })
+      .then(function (data) {
+        if (data.success) {
+          state.practices = data.practices || [];
+          formEl.remove();
+          nameEl.textContent = name;
+          descEl.textContent = desc || '';
+          showToast('Pratica aggiornata.', 'success');
+        } else {
+          showToast('Errore nell\'aggiornamento.', 'error');
+        }
+      })
+      .catch(function () { showToast('Impossibile aggiornare la pratica.', 'error'); });
+  }
+
+  function doDeletePractice(code) {
+    apiFetch('/api/practices/' + encodeURIComponent(code), { method: 'DELETE' })
+      .then(function (data) {
+        if (data.success) {
+          state.practices = data.practices || [];
+          renderPractices();
+          showToast('Pratica eliminata.', 'success');
+        } else {
+          showToast('Errore nell\'eliminazione della pratica.', 'error');
+        }
+      })
+      .catch(function () { showToast('Impossibile eliminare la pratica.', 'error'); });
+  }
+
+  /* ── Event Binding ──────────────────────────────────────────── */
+  function bindEvents() {
+    // Theme toggle
+    document.getElementById('themeToggle').addEventListener('click', function () {
+      var cur = document.documentElement.getAttribute('data-theme') || 'dark';
+      applyTheme(cur === 'dark' ? 'light' : 'dark');
+    });
+
+    // Settings (practices)
+    document.getElementById('settingsBtn').addEventListener('click', openPractices);
+    document.getElementById('closePracticesBtn').addEventListener('click', closePractices);
+    document.getElementById('practicesModal').addEventListener('click', function (e) {
+      if (e.target === e.currentTarget) closePractices();
+    });
+
+    // Composer textarea
+    var ta = document.getElementById('composerTextarea');
+    ta.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        var text = ta.value.trim();
+        if (text) { addEntry(text); ta.value = ''; autoResize(ta); }
+      }
+    });
+    ta.addEventListener('input', function () { autoResize(ta); });
+
+    // Send button
+    document.getElementById('sendBtn').addEventListener('click', function () {
+      var text = ta.value.trim();
+      if (text) { addEntry(text); ta.value = ''; autoResize(ta); }
+    });
+
+    // Outlook button
+    document.getElementById('outlookBtn').addEventListener('click', importOutlook);
+
+    // Elaborate buttons
+    document.getElementById('elaborateBtn').addEventListener('click', function () {
+      elaborate(document.getElementById('elaborateBtn'));
+    });
+    document.getElementById('reElaborateBtn').addEventListener('click', function () {
+      elaborate(document.getElementById('reElaborateBtn'));
+    });
+
+    // Copy JSON
+    document.getElementById('copyJsonBtn').addEventListener('click', copyJson);
+
+    // Add practice
+    document.getElementById('addPracticeBtn').addEventListener('click', doAddPractice);
+    ['newCode', 'newName', 'newDesc'].forEach(function (id) {
+      document.getElementById(id).addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') doAddPractice();
+      });
+    });
+
+    // Escape to close modal
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') closePractices();
+    });
+  }
+
+  function autoResize(el) {
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+  }
+
+  /* ── Boot ───────────────────────────────────────────────────── */
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+
+}());
+</script>
+</body>
+</html>
