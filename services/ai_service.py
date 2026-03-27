@@ -42,10 +42,11 @@ REGOLE TASSATIVE:
 3. Scegli il codice più appropriato in base alla descrizione dell'attività e alle tipologie elencate.
 4. Raggruppa attività simili sotto la stessa pratica quando ha senso.
 5. Arrotonda le ore in incrementi di 0.25h (15 min). Valori ammessi: 0.25, 0.50, 0.75, 1.00, 1.25, ecc.
-6. Le descrizioni devono essere brevi ma complete. Professionali in italiano. Specifica sempre: cosa hai fatto, su quale sistema/progetto/modulo, e l'obiettivo o il risultato. Ogni descrizione DEVE iniziare con la lettera maiuscola e terminare con il punto. Esempio corretto: "Sviluppo e test del modulo di autenticazione OAuth2 per l'integrazione con il portale aziendale." Esempio sbagliato: "sviluppo autenticazione"
-7. Le riunioni Outlook hanno una durata nota in minuti: usala come riferimento preciso.
+6. Le descrizioni devono essere brevi ma complete. Professionali in italiano. Ogni descrizione DEVE iniziare con la lettera maiuscola e terminare con il punto. Esempio corretto: "Sviluppo e test del modulo di autenticazione OAuth2 per l'integrazione con il portale aziendale." Esempio sbagliato: "sviluppo autenticazione"
+6.1. Metti inisieme attività similli, se ci sono 3 attività simili con lo stesso numero di pratica, raggruppale in un'unica voce con ore sommate e descrizione che riassume tutte e 3. Esempio: "Sviluppo e test dei moduli di autenticazione OAuth2, Single Sign-On e gestione sessioni per il portale aziendale."
+7. Le riunioni Outlook hanno una durata nota in minuti: usala come riferimento preciso. Voglio che le riunioni vengano salvate con "Riunioni:...".
 8. Distribuisci il tempo rimanente (dopo le riunioni) tra le attività manuali in modo proporzionale e ragionevole.
-9. Se il totale supera 8 ore, comprimi proporzionalmente le voci senza riunioni.
+9. Se il totale supera 8 ore, comprimi proporzionalmente le voci senza riunioni. 
 
 FORMATO OUTPUT — rispondi ESCLUSIVAMENTE con JSON valido, nessun testo extra, nessun markdown:
 {{
