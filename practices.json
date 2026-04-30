@@ -1,12 +1,32 @@
 [
   {
-    "code": "6450",
-    "name": "Programmazione",
-    "description": "Programmazione, sviluppo software, coding, implementazione, debugging, deploy, code review, architettura software, database design, API development, testing automatico, DevOps"
+    "code": "299110",
+    "name": "ANALISI & PROGETTAZIONE",
+    "description": "# Quando usarla:   - Raccolta requisiti  - analisi processi  - progettazione soluzioni  - definizione architettura  - studio AI/office use case   # Quando NON usarla:  Se stai già scrivendo codice o configurando l'automazione.   # Scopo:  Misurare l'investimento intellettuale e lo studio dei casi d'uso."
   },
   {
-    "code": "6447",
-    "name": "Supporto IT",
-    "description": "Supporto IT, assistenza utenti, troubleshooting, risoluzione problemi, help desk, configurazione PC/software, formazione utenti, supporto tecnico, gestione account e permessi"
+    "code": "299111",
+    "name": "SVILUPPO & IMPLEMENTAZIONE",
+    "description": "# Quando usarla:   - Scrittura codice  - automazioni AI / Office  - addestramento modelli AI  - prime implementazioni   # Quando NON usarla:  Per correggere bug su cose già rilasciate o per attività di routine.   # Scopo:  Tracciare la creazione effettiva di codice e automazioni Office/AI."
+  },
+  {
+    "code": "299112",
+    "name": "SUPPORTO & INFRASTRUTTURE",
+    "description": "# Quando usarla:   - Supporto primo livello  - installazione postazioni  - configurazione account e accessi  - assistenza su applicativi   # Quando NON usarla:  bug fixing strutturale (→ MANUTENZIONE) sviluppo tool (→ SVILUPPO)   # Scopo:  Isolare i costi della gestione hardware e dell'assistenza di primo livello."
+  },
+  {
+    "code": "299113",
+    "name": "MANUTENZIONE & DEBUG",
+    "description": "# Quando usarla:   - Bug fixing/ debug tecnico  - aggiornamento/integrazioni post-rilascio  - miglioramento di un'automazione esistente.   # Quando NON usarla:  Se stai aggiungendo una funzionalità core completamente nuova.   # Scopo:  Quantificare il \"debito tecnico\" e il tempo speso per correggere errori post-rilascio ed individuare le responsabilità."
+  },
+  {
+    "code": "299114",
+    "name": "DOCUMENTAZIONE & FORMAZIONE",
+    "description": "# Quando usarla:   - Scrittura manuali  - training agli utenti dello studio sull'uso delle AI o dei nuovi applicativi.    # Quando NON usarla:  Durante le riunioni di brainstorming (va in Analisi).   # Scopo:  Garantire che il trasferimento di conoscenza agli utenti non venga trascurato."
+  },
+  {
+    "code": "299115",
+    "name": "COORDINAMENTO & INTERNO",
+    "description": "# Quando usarla:   - Riunioni di avanzamento  - allineamento team  - gestione fornitori    # Quando NON usarla:  Per il lavoro operativo sui task.   # Scopo:  Monitorare il \"tempo non operativo\" speso in riunioni e gestione fornitori."
   }
 ]

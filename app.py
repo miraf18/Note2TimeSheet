@@ -161,6 +161,30 @@ def api_elaborate():
     except ValueError as e:
         return jsonify({"success": False, "error": str(e)}), 400
     except Exception as e:
+        try:
+            from openai import AuthenticationError, APIConnectionError, APIStatusError
+        except Exception:
+            AuthenticationError = APIConnectionError = APIStatusError = tuple()
+
+        if AuthenticationError and isinstance(e, AuthenticationError):
+            return jsonify({
+                "success": False,
+                "error": "OpenAI API key non valida o non piu' attiva. Verifica OPENAI_API_KEY nel file .env.",
+            }), 401
+
+        if APIConnectionError and isinstance(e, APIConnectionError):
+            return jsonify({
+                "success": False,
+                "error": "Impossibile contattare OpenAI. Controlla connessione, proxy o firewall.",
+            }), 502
+
+        if APIStatusError and isinstance(e, APIStatusError):
+            return jsonify({
+                "success": False,
+                "error": f"OpenAI ha restituito un errore API ({getattr(e, 'status_code', 'sconosciuto')}).",
+            }), 502
+
+        app.logger.exception("Errore inatteso durante l'elaborazione AI")
         return jsonify({"success": False, "error": f"Errore AI: {e}"}), 500
 
     state_service.set_elaboration(result)
