@@ -22,6 +22,7 @@ ENV/
 
 # ── Stato interno dell'app ───────────────────────────
 .timesheet_state.json
+data/
 
 # ── OS ───────────────────────────────────────────────
 .DS_Store

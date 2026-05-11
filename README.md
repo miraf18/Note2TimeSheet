@@ -122,6 +122,52 @@ python app.py
 
 L'app si apre automaticamente su `http://localhost:5599`.
 
+## Avvio con Docker
+
+Docker e' utile se vuoi distribuire o aggiornare l'app senza reinstallare ogni volta Python e dipendenze. I dati modificabili sono tenuti fuori dall'immagine nella cartella locale `data/`, quindi puoi ricostruire il container senza perdere pratiche e stato giornaliero.
+
+> Nota: l'import da Outlook usa `pywin32` e funziona solo su Windows fuori da Docker. Nel container Linux l'app resta utilizzabile, ma Outlook risulta non disponibile.
+
+### 1. Prepara la configurazione
+
+Assicurati di avere un file `.env` nella cartella del progetto:
+
+```bash
+copy .env.example .env
+```
+
+Poi compila almeno `OPENAI_API_KEY`, `USER_NAME` e `APP_PORT`.
+
+### 2. Avvia il container
+
+```bash
+docker compose up -d --build
+```
+
+Apri l'app su:
+
+```text
+http://localhost:5599
+```
+
+### 3. Aggiorna dopo modifiche al codice
+
+Quando modifichi il codice o scarichi una versione nuova:
+
+```bash
+docker compose up -d --build
+```
+
+Docker ricostruisce l'immagine e riavvia il container. I file in `data/` rimangono sul computer.
+
+### 4. Comandi utili
+
+```bash
+docker compose logs -f
+docker compose down
+docker compose restart
+```
+
 ## Configurazione pratiche
 
 Le pratiche definiscono i codici che l'AI puo' assegnare alle attivita'. Ogni pratica contiene:

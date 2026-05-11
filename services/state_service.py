@@ -24,7 +24,10 @@ import datetime
 import uuid
 import os
 
-STATE_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".timesheet_state.json")
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR = os.getenv("TIMESHEET_DATA_DIR", BASE_DIR)
+os.makedirs(DATA_DIR, exist_ok=True)
+STATE_FILE = os.path.join(DATA_DIR, ".timesheet_state.json")
 
 
 def _today():

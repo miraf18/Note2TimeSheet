@@ -6,6 +6,7 @@ AI-powered local timesheet processing with OpenAI GPT-4.1-mini.
 import os
 import json
 import datetime
+import shutil
 import webbrowser
 import threading
 
@@ -17,7 +18,14 @@ load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 APP_PORT = int(os.getenv("APP_PORT", "5599"))
 USER_NAME = os.getenv("USER_NAME", "User")
-PRACTICES_FILE = os.path.join(BASE_DIR, "practices.json")
+AUTO_OPEN_BROWSER = os.getenv("AUTO_OPEN_BROWSER", "true").strip().lower() == "true"
+DATA_DIR = os.getenv("TIMESHEET_DATA_DIR", BASE_DIR)
+os.makedirs(DATA_DIR, exist_ok=True)
+
+PRACTICES_FILE = os.path.join(DATA_DIR, "practices.json")
+DEFAULT_PRACTICES_FILE = os.path.join(BASE_DIR, "practices.json")
+if not os.path.exists(PRACTICES_FILE) and os.path.exists(DEFAULT_PRACTICES_FILE):
+    shutil.copyfile(DEFAULT_PRACTICES_FILE, PRACTICES_FILE)
 
 from services import state_service, webhook_service, outlook_service, ai_service
 
@@ -297,5 +305,6 @@ if __name__ == "__main__":
     print(f"  Webhook: {'abilitato' if webhook_service.is_webhook_enabled() else 'disabilitato'}")
     print(f"  OpenAI: {'configurato' if os.getenv('OPENAI_API_KEY') else 'NON configurato (imposta OPENAI_API_KEY nel .env)'}")
     print()
-    threading.Timer(1.5, _open_browser).start()
+    if AUTO_OPEN_BROWSER:
+        threading.Timer(1.5, _open_browser).start()
     app.run(host="0.0.0.0", port=APP_PORT, debug=False)

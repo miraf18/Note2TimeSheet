@@ -1,0 +1,16 @@
+services:
+  timesheet:
+    build: .
+    image: timesheet-app:latest
+    container_name: timesheet-app
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      APP_PORT: 5599
+      AUTO_OPEN_BROWSER: "false"
+      TIMESHEET_DATA_DIR: /app/data
+    ports:
+      - "5599:5599"
+    volumes:
+      - ./data:/app/data
