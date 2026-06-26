@@ -133,6 +133,54 @@ html, body {
   white-space: nowrap;
 }
 
+.header-day-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.header-day-select {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 2px 6px;
+  cursor: pointer;
+  max-width: 240px;
+  text-align: center;
+  text-align-last: center;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.header-day-select:hover {
+  background: var(--surface-2, rgba(255, 255, 255, 0.06));
+  border-color: var(--border, rgba(255, 255, 255, 0.12));
+}
+
+.header-day-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.header-day-select option {
+  background: var(--surface, #1a1a1a);
+  color: var(--text);
+}
+
+.header-day-badge {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-radius: 4px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
 .header-time {
   font-size: 11px;
   font-weight: 400;
@@ -1061,7 +1109,10 @@ table.ts-table {
     </div>
 
     <div class="header-center">
-      <span class="header-date" id="headerDate"></span>
+      <div class="header-day-row">
+        <select class="header-day-select" id="daySelect" title="Seleziona giorno dallo storico"></select>
+        <span class="header-day-badge hidden" id="pastDayBadge">storico</span>
+      </div>
       <span class="header-time" id="headerTime"></span>
     </div>
 
@@ -1264,6 +1315,8 @@ table.ts-table {
     practices: [],
     confirmDelete: null,
     confirmDeletePractice: null,
+    selectedDate: null,   // ISO day currently shown (null => today)
+    days: [],             // history summaries from /api/days
   };
 
   /* ── Security: XSS escaping ─────────────────────────────────── */
@@ -1298,15 +1351,42 @@ table.ts-table {
     return new Date().toISOString().slice(0, 10);
   }
 
-  /* ── Clock ──────────────────────────────────────────────────── */
-  const DAYS   = ['Domenica','Lunedì','Martedì','Mercoledì','Giovedì','Venerdì','Sabato'];
-  const MONTHS = ['gennaio','febbraio','marzo','aprile','maggio','giugno',
-                  'luglio','agosto','settembre','ottobre','novembre','dicembre'];
+  /* ── Selected day helpers ───────────────────────────────────── */
+  function currentDate() {
+    return state.selectedDate || todayISO();
+  }
 
+  function isToday() {
+    return currentDate() === todayISO();
+  }
+
+  // Append the selected day to a URL as a query param.
+  function withDate(url) {
+    var sep = url.indexOf('?') === -1 ? '?' : '&';
+    return url + sep + 'date=' + encodeURIComponent(currentDate());
+  }
+
+  // Merge the selected day into a JSON body object.
+  function withDateBody(obj) {
+    return Object.assign({ date: currentDate() }, obj || {});
+  }
+
+  var DAYS_SHORT   = ['Dom', 'Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab'];
+  var MONTHS_SHORT = ['gen', 'feb', 'mar', 'apr', 'mag', 'giu',
+                      'lug', 'ago', 'set', 'ott', 'nov', 'dic'];
+
+  function dayLabel(iso) {
+    var p = iso.split('-');
+    var d = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+    var base = DAYS_SHORT[d.getDay()] + ' ' + d.getDate() + ' ' +
+               MONTHS_SHORT[d.getMonth()];
+    if (iso === todayISO()) base = 'Oggi · ' + base;
+    return base;
+  }
+
+  /* ── Clock ──────────────────────────────────────────────────── */
   function tickClock() {
     const now = new Date();
-    document.getElementById('headerDate').textContent =
-      DAYS[now.getDay()] + ' ' + now.getDate() + ' ' + MONTHS[now.getMonth()] + ' ' + now.getFullYear();
     document.getElementById('headerTime').textContent =
       now.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   }
@@ -1349,6 +1429,70 @@ table.ts-table {
     });
   }
 
+  /* ── Day selector ───────────────────────────────────────────── */
+  function populateDaySelect() {
+    var sel = document.getElementById('daySelect');
+    if (!sel) return;
+    var today = todayISO();
+    var days  = state.days.slice();
+
+    // Guarantee today is always selectable, even with empty history.
+    if (!days.some(function (d) { return d.date === today; })) {
+      days.unshift({ date: today, entry_count: 0, elaborated: false });
+    }
+
+    sel.innerHTML = '';
+    days.forEach(function (d) {
+      var opt = document.createElement('option');
+      opt.value = d.date;
+      var marks = '';
+      if (d.entry_count) marks += ' · ' + d.entry_count + ' voci';
+      if (d.elaborated)  marks += ' ✓';
+      else if (d.entry_count) marks += ' •';   // entered but not elaborated
+      opt.textContent = dayLabel(d.date) + marks;
+      sel.appendChild(opt);
+    });
+    sel.value = currentDate();
+  }
+
+  function refreshDays() {
+    return apiFetch('/api/days')
+      .then(function (data) {
+        state.days = (data && data.days) || [];
+        populateDaySelect();
+      })
+      .catch(function () { /* keep previous list */ });
+  }
+
+  function updatePastBadge() {
+    document.getElementById('pastDayBadge')
+      .classList.toggle('hidden', isToday());
+  }
+
+  // Load entries + elaboration for the currently selected day.
+  function loadSelectedDay() {
+    updatePastBadge();
+    return Promise.all([
+      apiFetch(withDate('/api/entries')),
+      apiFetch(withDate('/api/elaborate')).catch(function () { return null; }),
+    ]).then(function (res) {
+      var entData  = res[0] || {};
+      var elabData = res[1];
+      state.entries = entData.entries || [];
+      state.elaboration = (elabData && elabData.result) ? elabData : null;
+      renderEntries();
+      renderElaboration();
+    }).catch(function () {
+      showToast('Errore nel caricamento del giorno selezionato.', 'error');
+    });
+  }
+
+  function onDayChange(date) {
+    state.selectedDate = date;
+    state.confirmDelete = null;
+    loadSelectedDay();
+  }
+
   /* ── Init ───────────────────────────────────────────────────── */
   function init() {
     tickClock();
@@ -1356,20 +1500,25 @@ table.ts-table {
 
     applyTheme(localStorage.getItem('ts-theme') || 'dark');
 
+    state.selectedDate = todayISO();
+
     Promise.all([
       apiFetch('/api/config'),
-      apiFetch('/api/entries'),
-      apiFetch('/api/elaborate').catch(function () { return null; }),
+      apiFetch(withDate('/api/entries')),
+      apiFetch(withDate('/api/elaborate')).catch(function () { return null; }),
       apiFetch('/api/practices').catch(function () { return null; }),
+      apiFetch('/api/days').catch(function () { return null; }),
     ]).then(function (results) {
       const cfg       = results[0] || {};
       const entData   = results[1] || {};
       const elabData  = results[2];
       const pracData  = results[3];
+      const daysData  = results[4];
 
       state.config    = cfg;
       state.entries   = (entData.entries) || [];
       state.practices = (pracData && pracData.practices) || [];
+      state.days      = (daysData && daysData.days) || [];
 
       if (elabData && elabData.result) {
         state.elaboration = elabData;
@@ -1380,14 +1529,17 @@ table.ts-table {
       badge.textContent = name ? name.charAt(0).toUpperCase() : '?';
       badge.title = name || 'Utente';
 
-      if (cfg.outlook_available) {
+      if (cfg.meetings_available) {
         document.getElementById('outlookBtn').disabled = false;
       }
 
+      populateDaySelect();
+      updatePastBadge();
       renderEntries();
       renderElaboration();
     }).catch(function () {
       showToast('Errore durante il caricamento iniziale.', 'error');
+      populateDaySelect();
       renderEntries();
       renderElaboration();
     });
@@ -1511,11 +1663,12 @@ table.ts-table {
     btn.innerHTML = '<span class="spinner"></span>';
     btn.disabled = true;
 
-    apiFetch('/api/entry', { method: 'POST', body: JSON.stringify({ text: text }) })
+    apiFetch('/api/entry', { method: 'POST', body: JSON.stringify(withDateBody({ text: text })) })
       .then(function (data) {
         if (data.success && data.entry) {
           state.entries = state.entries.concat([data.entry]);
           renderEntries();
+          refreshDays();
           var list = document.getElementById('entryList');
           list.scrollTop = list.scrollHeight;
         } else {
@@ -1549,11 +1702,12 @@ table.ts-table {
   }
 
   function doDeleteEntry(id) {
-    apiFetch('/api/entry/' + id, { method: 'DELETE' })
+    apiFetch(withDate('/api/entry/' + id), { method: 'DELETE' })
       .then(function (data) {
         if (data.success) {
           state.entries = state.entries.filter(function (e) { return e.id !== id; });
           renderEntries();
+          refreshDays();
         } else {
           showToast('Errore nell\'eliminazione.', 'error');
         }
@@ -1562,7 +1716,7 @@ table.ts-table {
   }
 
   function doEditEntry(id, newText, ta, textEl) {
-    apiFetch('/api/entry/' + id, { method: 'PUT', body: JSON.stringify({ text: newText }) })
+    apiFetch('/api/entry/' + id, { method: 'PUT', body: JSON.stringify(withDateBody({ text: newText })) })
       .then(function (data) {
         if (data.success && data.entry) {
           state.entries = state.entries.map(function (e) { return e.id === id ? data.entry : e; });
@@ -1575,33 +1729,159 @@ table.ts-table {
       .catch(function () { ta.replaceWith(textEl); showToast('Impossibile modificare.', 'error'); });
   }
 
-  /* ── Outlook ────────────────────────────────────────────────── */
+  /* ── Outlook / Microsoft Graph ──────────────────────────────── */
   function importOutlook() {
     var btn = document.getElementById('outlookBtn');
     var orig = btn.innerHTML;
     btn.innerHTML = '<span class="spinner" style="border-color:rgba(139,92,246,0.3);border-top-color:var(--outlook);"></span>';
     btn.disabled = true;
 
-    apiFetch('/api/outlook', { method: 'POST' })
+    function restoreBtn() {
+      btn.innerHTML = orig;
+      btn.disabled = !state.config.meetings_available;
+    }
+
+    // Raw fetch so we can read the body on a 401 (auth_required).
+    fetch(withDate('/api/outlook'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(withDateBody({})),
+    })
+      .then(function (res) { return res.json().catch(function () { return {}; }); })
       .then(function (data) {
-        if (data.success) {
+        if (data && data.auth_required && data.device) {
+          restoreBtn();
+          showGraphAuthModal(data.device);
+          return;
+        }
+        if (data && data.success) {
           var n = data.new || 0;
           var s = data.skipped || 0;
           showToast(n + ' nuov' + (n === 1 ? 'a' : 'e') + ' riunion' + (n === 1 ? 'e' : 'i') +
                     ', ' + s + ' già importat' + (s === 1 ? 'a' : 'e') + '.', 'success');
-          return apiFetch('/api/entries');
+          apiFetch(withDate('/api/entries')).then(function (entData) {
+            if (entData && entData.entries) {
+              state.entries = entData.entries;
+              renderEntries();
+              refreshDays();
+            }
+          }).finally(restoreBtn);
+          return;
         }
-        showToast('Errore durante l\'importazione da Outlook.', 'error');
-        return null;
+        showToast((data && data.error) || 'Errore durante l\'importazione delle riunioni.', 'error');
+        restoreBtn();
       })
-      .then(function (entData) {
-        if (entData && entData.entries) {
-          state.entries = entData.entries;
-          renderEntries();
-        }
-      })
-      .catch(function () { showToast('Impossibile importare da Outlook.', 'error'); })
-      .finally(function () { btn.innerHTML = orig; btn.disabled = !state.config.outlook_available; });
+      .catch(function () {
+        showToast('Impossibile importare le riunioni.', 'error');
+        restoreBtn();
+      });
+  }
+
+  /* ── Graph device-code login modal ──────────────────────────── */
+  var _graphPollTimer = null;
+
+  function closeGraphAuthModal() {
+    if (_graphPollTimer) { clearInterval(_graphPollTimer); _graphPollTimer = null; }
+    var m = document.getElementById('graphAuthModal');
+    if (m) m.remove();
+  }
+
+  function showGraphAuthModal(device) {
+    closeGraphAuthModal();
+
+    var uri  = device.verification_uri || 'https://microsoft.com/devicelogin';
+    var code = device.user_code || '';
+
+    var overlay = document.createElement('div');
+    overlay.id = 'graphAuthModal';
+    overlay.style.cssText =
+      'position:fixed;inset:0;z-index:1000;display:flex;align-items:center;' +
+      'justify-content:center;background:rgba(0,0,0,0.55);backdrop-filter:blur(2px);';
+
+    var box = document.createElement('div');
+    box.style.cssText =
+      'background:var(--surface,#1b1b1f);color:var(--text,#eee);border:1px solid ' +
+      'var(--border,rgba(255,255,255,0.12));border-radius:14px;padding:24px 26px;' +
+      'max-width:380px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.5);text-align:center;';
+
+    var h = document.createElement('h3');
+    h.textContent = 'Collega il calendario Microsoft';
+    h.style.cssText = 'margin:0 0 8px;font-size:16px;';
+
+    var p = document.createElement('p');
+    p.style.cssText = 'margin:0 0 16px;font-size:13px;color:var(--text-muted,#aaa);line-height:1.5;';
+    p.textContent = 'Apri la pagina di login Microsoft e inserisci questo codice:';
+
+    var codeEl = document.createElement('div');
+    codeEl.textContent = code;
+    codeEl.style.cssText =
+      'font-size:26px;font-weight:700;letter-spacing:0.12em;margin:0 0 18px;' +
+      'font-variant-numeric:tabular-nums;color:var(--accent,#7c6cff);' +
+      'user-select:all;cursor:pointer;';
+    codeEl.title = 'Clicca per copiare';
+    codeEl.addEventListener('click', function () {
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(code).then(function () {
+          showToast('Codice copiato.', 'success');
+        });
+      }
+    });
+
+    var openBtn = document.createElement('a');
+    openBtn.href = uri;
+    openBtn.target = '_blank';
+    openBtn.rel = 'noopener';
+    openBtn.textContent = 'Apri pagina di login';
+    openBtn.className = 'btn btn-primary';
+    openBtn.style.cssText = 'display:inline-block;text-decoration:none;margin-bottom:14px;';
+
+    var status = document.createElement('div');
+    status.id = 'graphAuthStatus';
+    status.style.cssText = 'font-size:12px;color:var(--text-muted,#aaa);min-height:18px;';
+    status.innerHTML = '<span class="spinner" style="vertical-align:-2px;margin-right:6px;"></span>In attesa del login...';
+
+    var closeBtn = document.createElement('button');
+    closeBtn.textContent = 'Annulla';
+    closeBtn.className = 'btn';
+    closeBtn.style.cssText = 'margin-top:14px;display:block;width:100%;background:transparent;border:1px solid var(--border,rgba(255,255,255,0.15));';
+    closeBtn.addEventListener('click', closeGraphAuthModal);
+
+    box.appendChild(h);
+    box.appendChild(p);
+    box.appendChild(codeEl);
+    box.appendChild(openBtn);
+    box.appendChild(status);
+    box.appendChild(closeBtn);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    // Open the Microsoft login page proactively.
+    try { window.open(uri, '_blank', 'noopener'); } catch (_) {}
+
+    var elapsed = 0;
+    var maxWait = (device.expires_in || 900) * 1000;
+    _graphPollTimer = setInterval(function () {
+      elapsed += 3000;
+      apiFetch('/api/meetings/auth-status')
+        .then(function (st) {
+          if (st && st.authenticated) {
+            closeGraphAuthModal();
+            state.config.meetings_authenticated = true;
+            showToast('Calendario collegato. Importo le riunioni...', 'success');
+            importOutlook();
+          } else if (st && st.error) {
+            var s = document.getElementById('graphAuthStatus');
+            if (s) { s.textContent = st.error; s.style.color = 'var(--danger,#e5484d)'; }
+            if (_graphPollTimer) { clearInterval(_graphPollTimer); _graphPollTimer = null; }
+          }
+        })
+        .catch(function () {});
+      if (elapsed >= maxWait) {
+        var s2 = document.getElementById('graphAuthStatus');
+        if (s2) s2.textContent = 'Tempo scaduto. Riprova.';
+        if (_graphPollTimer) { clearInterval(_graphPollTimer); _graphPollTimer = null; }
+      }
+    }, 3000);
   }
 
   /* ── Elaborate ──────────────────────────────────────────────── */
@@ -1610,11 +1890,12 @@ table.ts-table {
     btn.innerHTML = '<span class="spinner"></span><span>Elaborazione in corso...</span>';
     btn.disabled = true;
 
-    apiFetch('/api/elaborate', { method: 'POST' })
+    apiFetch(withDate('/api/elaborate'), { method: 'POST', body: JSON.stringify(withDateBody({})) })
       .then(function (data) {
         if (data.success && data.result) {
           state.elaboration = data;
           renderElaboration();
+          refreshDays();
           showToast('Timesheet generato con successo.', 'success');
         } else {
           showToast('Errore durante l\'elaborazione.', 'error');
@@ -2084,6 +2365,11 @@ table.ts-table {
 
   /* ── Event Binding ──────────────────────────────────────────── */
   function bindEvents() {
+    // Day selector (history)
+    document.getElementById('daySelect').addEventListener('change', function () {
+      onDayChange(this.value);
+    });
+
     // Theme toggle
     document.getElementById('themeToggle').addEventListener('click', function () {
       var cur = document.documentElement.getAttribute('data-theme') || 'dark';

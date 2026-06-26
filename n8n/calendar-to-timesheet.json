@@ -1,0 +1,132 @@
+{
+  "name": "TimeSheet — Calendario Microsoft → App",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "timesheet-meetings",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "11111111-1111-4111-8111-111111111111",
+      "name": "Webhook (richiesta dall'app)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-220, 0],
+      "webhookId": "timesheet-meetings"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://graph.microsoft.com/v1.0/me/calendarView",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "microsoftOutlookOAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "outlook.timezone=\"UTC\""
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "startDateTime",
+              "value": "={{ $json.body.start }}"
+            },
+            {
+              "name": "endDateTime",
+              "value": "={{ $json.body.end }}"
+            },
+            {
+              "name": "$select",
+              "value": "subject,start,end,isAllDay,isCancelled"
+            },
+            {
+              "name": "$orderby",
+              "value": "start/dateTime"
+            },
+            {
+              "name": "$top",
+              "value": "100"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "22222222-2222-4222-8222-222222222222",
+      "name": "Microsoft Graph — calendarView",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [20, 0]
+    },
+    {
+      "parameters": {
+        "jsType": "javaScript",
+        "jsCode": "// Trasforma gli eventi di Microsoft Graph nel formato atteso dall'app.\nconst res = $input.first().json || {};\nconst events = Array.isArray(res.value) ? res.value : [];\n\nfunction parse(dt) {\n  if (!dt) return null;\n  const s = String(dt).replace('Z', '').split('.')[0];\n  const d = new Date(s + 'Z');\n  return isNaN(d.getTime()) ? null : d;\n}\n\nconst meetings = [];\nconst seen = new Set();\n\nfor (const ev of events) {\n  if (ev.isCancelled) continue;\n\n  const subject = String(ev.subject || '').trim() || 'Senza oggetto';\n  const isAllDay = !!ev.isAllDay;\n\n  let duration = 0;\n  if (isAllDay) {\n    duration = 480;\n  } else {\n    const s = parse(ev.start && ev.start.dateTime);\n    const e = parse(ev.end && ev.end.dateTime);\n    if (s && e) duration = Math.round((e - s) / 60000);\n  }\n\n  if (!isAllDay && duration < 5) continue;\n\n  const meeting_id = String(ev.id || subject);\n  if (seen.has(meeting_id)) continue;\n  seen.add(meeting_id);\n\n  meetings.push({\n    subject: subject,\n    duration: duration,\n    duration_label: isAllDay ? 'Tutto il giorno' : String(duration),\n    is_allday: isAllDay,\n    meeting_id: meeting_id,\n  });\n}\n\nreturn [{ json: { meetings: meetings } }];"
+      },
+      "id": "33333333-3333-4333-8333-333333333333",
+      "name": "Formatta riunioni",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [260, 0]
+    },
+    {
+      "parameters": {
+        "respondWith": "firstIncomingItem",
+        "options": {}
+      },
+      "id": "44444444-4444-4444-8444-444444444444",
+      "name": "Rispondi all'app",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [500, 0]
+    }
+  ],
+  "connections": {
+    "Webhook (richiesta dall'app)": {
+      "main": [
+        [
+          {
+            "node": "Microsoft Graph — calendarView",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Microsoft Graph — calendarView": {
+      "main": [
+        [
+          {
+            "node": "Formatta riunioni",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatta riunioni": {
+      "main": [
+        [
+          {
+            "node": "Rispondi all'app",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "pinData": {},
+  "meta": {
+    "templatecredsSetupCompleted": false
+  }
+}

@@ -27,7 +27,14 @@ DEFAULT_PRACTICES_FILE = os.path.join(BASE_DIR, "practices.json")
 if not os.path.exists(PRACTICES_FILE) and os.path.exists(DEFAULT_PRACTICES_FILE):
     shutil.copyfile(DEFAULT_PRACTICES_FILE, PRACTICES_FILE)
 
-from services import state_service, webhook_service, outlook_service, ai_service
+from services import (
+    state_service,
+    webhook_service,
+    outlook_service,
+    ai_service,
+    graph_service,
+    n8n_meetings_service,
+)
 
 # ---- Practices helpers ----
 
@@ -66,20 +73,68 @@ def index():
 
 # ---- Config ----
 
+def _meeting_provider():
+    """Pick the calendar backend.
+
+    Priority: n8n (explicit opt-in via N8N_MEETINGS_URL) > COM (local Windows)
+    > Microsoft Graph (Docker/server) > none.
+    """
+    if n8n_meetings_service.is_configured():
+        return "n8n"
+    if outlook_service.is_available():
+        return "com"
+    if graph_service.is_configured():
+        return "graph"
+    return "none"
+
+
 @app.route("/api/config")
 def api_config():
+    provider = _meeting_provider()
+    if provider in ("com", "n8n"):
+        authenticated = True
+    elif provider == "graph":
+        authenticated = graph_service.is_authenticated()
+    else:
+        authenticated = False
     return jsonify({
         "user_name": USER_NAME,
-        "outlook_available": outlook_service.is_available(),
+        "outlook_available": outlook_service.is_available(),  # legacy
+        "meetings_available": provider != "none",
+        "meetings_provider": provider,
+        "meetings_authenticated": authenticated,
         "webhook_enabled": webhook_service.is_webhook_enabled(),
     })
 
 
+@app.route("/api/meetings/auth-status")
+def api_meetings_auth_status():
+    if not graph_service.is_configured():
+        return jsonify({"configured": False, "authenticated": False, "pending": False})
+    return jsonify(graph_service.auth_status())
+
+
+# ---- History ----
+
+@app.route("/api/days")
+def api_days():
+    return jsonify({"days": state_service.list_days()})
+
+
 # ---- Entries ----
+
+def _req_date():
+    """Read the selected day from query string or JSON body (default: today)."""
+    date = request.args.get("date")
+    if not date:
+        body = request.get_json(silent=True) or {}
+        date = body.get("date")
+    return date  # state_service falls back to today when None/invalid
+
 
 @app.route("/api/entries")
 def api_entries():
-    return jsonify({"entries": state_service.get_entries()})
+    return jsonify({"entries": state_service.get_entries(date=_req_date())})
 
 
 @app.route("/api/entry", methods=["POST"])
@@ -88,13 +143,13 @@ def api_entry_add():
     text = (data.get("text") or "").strip()
     if not text:
         return jsonify({"success": False, "error": "Testo vuoto"}), 400
-    entry = state_service.add_entry(text, entry_type="manual")
+    entry = state_service.add_entry(text, entry_type="manual", date=data.get("date"))
     return jsonify({"success": True, "entry": entry})
 
 
 @app.route("/api/entry/<entry_id>", methods=["DELETE"])
 def api_entry_delete(entry_id):
-    removed = state_service.remove_entry(entry_id)
+    removed = state_service.remove_entry(entry_id, date=_req_date())
     if not removed:
         return jsonify({"success": False, "error": "Entry non trovata"}), 404
     return jsonify({"success": True})
@@ -106,7 +161,7 @@ def api_entry_update(entry_id):
     new_text = (data.get("text") or "").strip()
     if not new_text:
         return jsonify({"success": False, "error": "Testo vuoto"}), 400
-    updated = state_service.update_entry(entry_id, new_text)
+    updated = state_service.update_entry(entry_id, new_text, date=data.get("date"))
     if not updated:
         return jsonify({"success": False, "error": "Entry non trovata"}), 404
     return jsonify({"success": True, "entry": updated})
@@ -116,10 +171,27 @@ def api_entry_update(entry_id):
 
 @app.route("/api/outlook", methods=["POST"])
 def api_outlook():
-    if not outlook_service.is_available():
-        return jsonify({"success": False, "error": "Outlook non disponibile"}), 400
+    date = _req_date()
+    provider = _meeting_provider()
 
-    meetings, error = outlook_service.get_outlook_meetings()
+    if provider == "none":
+        return jsonify({"success": False, "error": "Nessuna integrazione calendario disponibile"}), 400
+
+    if provider == "n8n":
+        meetings, error = n8n_meetings_service.get_meetings(
+            target_date=state_service.resolve_date(date)
+        )
+    elif provider == "com":
+        meetings, error = outlook_service.get_outlook_meetings()
+    else:  # graph
+        meetings, error = graph_service.get_meetings(target_date=state_service.resolve_date(date))
+
+    if error == graph_service.AUTH_REQUIRED:
+        device = graph_service.start_device_login()
+        if not device:
+            return jsonify({"success": False, "error": "Impossibile avviare il login Microsoft."}), 400
+        return jsonify({"success": False, "auth_required": True, "device": device}), 401
+
     if error:
         return jsonify({"success": False, "error": error}), 400
 
@@ -128,7 +200,7 @@ def api_outlook():
 
     for m in (meetings or []):
         mid = m["meeting_id"]
-        if state_service.is_meeting_imported(mid):
+        if state_service.is_meeting_imported(mid, date=date):
             skipped_count += 1
             continue
         state_service.add_entry(
@@ -136,15 +208,16 @@ def api_outlook():
             entry_type="outlook",
             duration_min=m["duration"],
             meeting_id=mid,
+            date=date,
         )
-        state_service.mark_meeting_imported(mid)
+        state_service.mark_meeting_imported(mid, date=date)
         new_count += 1
 
     return jsonify({
         "success": True,
         "new": new_count,
         "skipped": skipped_count,
-        "entries": state_service.get_entries(),
+        "entries": state_service.get_entries(date=date),
     })
 
 
@@ -152,18 +225,19 @@ def api_outlook():
 
 @app.route("/api/elaborate", methods=["POST"])
 def api_elaborate():
-    entries = state_service.get_entries()
+    date = _req_date()
+    entries = state_service.get_entries(date=date)
     if not entries:
         return jsonify({"success": False, "error": "Nessuna attività da elaborare"}), 400
 
     practices = load_practices()
-    today = datetime.date.today().isoformat()
+    elab_date = state_service.resolve_date(date)
 
     try:
         result = ai_service.elaborate_timesheet(
             entries=entries,
             user_name=USER_NAME,
-            date=today,
+            date=elab_date,
             practices=practices,
         )
     except ValueError as e:
@@ -195,12 +269,12 @@ def api_elaborate():
         app.logger.exception("Errore inatteso durante l'elaborazione AI")
         return jsonify({"success": False, "error": f"Errore AI: {e}"}), 500
 
-    state_service.set_elaboration(result)
+    state_service.set_elaboration(result, date=date)
 
     # Optionally send to webhook
     if webhook_service.is_webhook_enabled():
         payload = {
-            "date": today,
+            "date": elab_date,
             "user": USER_NAME,
             "type": "elaborated_timesheet",
             "result": result,
@@ -212,7 +286,7 @@ def api_elaborate():
 
 @app.route("/api/elaborate", methods=["GET"])
 def api_elaborate_get():
-    return jsonify(state_service.get_elaboration())
+    return jsonify(state_service.get_elaboration(date=_req_date()))
 
 
 # ---- Practices CRUD ----
@@ -301,7 +375,14 @@ if __name__ == "__main__":
     print(f"\n  TimeSheet App v2")
     print(f"  http://localhost:{APP_PORT}")
     print(f"  Utente: {USER_NAME}")
-    print(f"  Outlook: {'disponibile' if outlook_service.is_available() else 'non disponibile'}")
+    _prov = _meeting_provider()
+    _prov_label = {
+        "n8n": "n8n (webhook Microsoft)",
+        "com": "Outlook desktop (COM)",
+        "graph": "Microsoft Graph (cloud)",
+        "none": "nessuna",
+    }[_prov]
+    print(f"  Riunioni: {_prov_label}")
     print(f"  Webhook: {'abilitato' if webhook_service.is_webhook_enabled() else 'disabilitato'}")
     print(f"  OpenAI: {'configurato' if os.getenv('OPENAI_API_KEY') else 'NON configurato (imposta OPENAI_API_KEY nel .env)'}")
     print()

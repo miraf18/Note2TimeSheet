@@ -6,6 +6,8 @@ __pycache__/
 *.pyd
 .env
 .timesheet_state.json
+.timesheet_history/
+.graph_token_cache.bin
 venv/
 .venv/
 env/

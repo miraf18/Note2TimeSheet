@@ -3,3 +3,4 @@ python-dotenv>=1.0
 requests>=2.28
 pywin32>=306; platform_system == "Windows"
 openai>=1.0
+msal>=1.28

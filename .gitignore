@@ -22,6 +22,8 @@ ENV/
 
 # ── Stato interno dell'app ───────────────────────────
 .timesheet_state.json
+.timesheet_history/
+.graph_token_cache.bin
 data/
 
 # ── OS ───────────────────────────────────────────────
