@@ -106,7 +106,10 @@ def get_meetings(account_email="", target_date=None):
     if not is_configured():
         return None, "Flusso n8n non configurato (manca N8N_MEETINGS_URL)."
 
-    target_date = target_date or datetime.date.today()
+    if not target_date:
+        target_date = datetime.date.today()
+    elif isinstance(target_date, str):
+        target_date = datetime.date.fromisoformat(target_date)
     start_utc, end_utc = _day_bounds_utc(target_date)
 
     headers = {"Content-Type": "application/json"}
