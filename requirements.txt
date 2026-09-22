@@ -1,6 +1,10 @@
+# Note2TimeSheet v2 - runtime dependencies
 flask>=3.0
 python-dotenv>=1.0
 requests>=2.28
-pywin32>=306; platform_system == "Windows"
 openai>=1.0
 msal>=1.28
+# IANA timezone database for zoneinfo (needed on Windows and slim Linux images)
+tzdata>=2024.1
+# Outlook desktop (COM) fallback - Windows only, skipped elsewhere
+pywin32>=306; platform_system == "Windows"

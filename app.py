@@ -1,391 +1,142 @@
-"""
-TimeSheet App v2 — Backend Flask
-AI-powered local timesheet processing with OpenAI GPT-4.1-mini.
-"""
+"""Note2TimeSheet — Flask application factory and command-line entry point."""
 
-import os
-import json
-import datetime
-import shutil
-import webbrowser
+from __future__ import annotations
+
+import logging
 import threading
+import webbrowser
+from typing import Callable
 
-from flask import Flask, render_template, jsonify, request
 from dotenv import load_dotenv
+from flask import Flask, jsonify, request
+from werkzeug.exceptions import HTTPException
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-load_dotenv(os.path.join(BASE_DIR, ".env"))
+import config
+from services import github_service, graph_service, settings_service
 
-APP_PORT = int(os.getenv("APP_PORT", "5599"))
-USER_NAME = os.getenv("USER_NAME", "User")
-AUTO_OPEN_BROWSER = os.getenv("AUTO_OPEN_BROWSER", "true").strip().lower() == "true"
-DATA_DIR = os.getenv("TIMESHEET_DATA_DIR", BASE_DIR)
-os.makedirs(DATA_DIR, exist_ok=True)
+logger = logging.getLogger(__name__)
 
-PRACTICES_FILE = os.path.join(DATA_DIR, "practices.json")
-DEFAULT_PRACTICES_FILE = os.path.join(BASE_DIR, "practices.json")
-if not os.path.exists(PRACTICES_FILE) and os.path.exists(DEFAULT_PRACTICES_FILE):
-    shutil.copyfile(DEFAULT_PRACTICES_FILE, PRACTICES_FILE)
+API_PREFIX = "/api/"
+BROWSER_OPEN_DELAY_S = 1.5
+LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 
-from services import (
-    state_service,
-    webhook_service,
-    outlook_service,
-    ai_service,
-    graph_service,
-    n8n_meetings_service,
-)
+NO_CACHE_HEADERS = {
+    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    "Pragma": "no-cache",
+    "Expires": "0",
+}
 
-# ---- Practices helpers ----
+API_ERROR_MESSAGES = {
+    400: "Richiesta non valida",
+    404: "Risorsa non trovata",
+    405: "Metodo non consentito",
+    500: "Errore interno del server",
+}
 
-def load_practices():
+
+# ---------------------------------------------------------------------------
+# Factory
+# ---------------------------------------------------------------------------
+
+def create_app(testing: bool = False) -> Flask:
+    """Build the Flask app. ``testing=True`` skips ``.env`` loading so fixtures
+    fully control the environment."""
+    if not testing:
+        load_dotenv(config.ENV_FILE)
+        _configure_logging()
+
+    app = Flask(__name__, static_folder="static", template_folder="templates")
+    app.config["TESTING"] = testing
+    app.json.sort_keys = False
+    app.json.ensure_ascii = False
+
+    from routes import register_blueprints
+
+    register_blueprints(app)
+    _register_no_cache(app)
+    _register_error_handlers(app)
+    return app
+
+
+def _configure_logging() -> None:
+    """Basic console logging (no-op when the root logger is already set up)."""
+    logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
+
+
+def _register_no_cache(app: Flask) -> None:
+    @app.after_request
+    def add_no_cache_headers(response):
+        if request.path.startswith(API_PREFIX) or response.mimetype == "text/html":
+            for header, value in NO_CACHE_HEADERS.items():
+                response.headers[header] = value
+        return response
+
+
+def _register_error_handlers(app: Flask) -> None:
+    for status in API_ERROR_MESSAGES:
+        app.register_error_handler(status, _handle_http_error)
+
+
+def _handle_http_error(error: HTTPException):
+    """JSON envelope for API paths; default HTML error page elsewhere."""
+    if not request.path.startswith(API_PREFIX):
+        return error
+    status = getattr(error, "code", None) or 500
+    if status >= 500:
+        logger.error("Errore %s su %s %s: %s", status, request.method, request.path, error)
+    message = API_ERROR_MESSAGES.get(status, "Errore")
+    return jsonify({"success": False, "error": message}), status
+
+
+# ---------------------------------------------------------------------------
+# Command-line entry point
+# ---------------------------------------------------------------------------
+
+def _integration_state(probe: Callable[[], bool]) -> str:
+    """Italian label describing whether an integration is connected (never raises)."""
     try:
-        with open(PRACTICES_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return []
+        connected = probe()
+    except Exception as exc:  # noqa: BLE001 - the banner must never abort startup
+        logger.warning("Stato di %s non disponibile: %s", getattr(probe, "__module__", probe), exc)
+        return "non disponibile"
+    return "connesso" if connected else "non connesso"
 
 
-def save_practices(practices):
-    with open(PRACTICES_FILE, "w", encoding="utf-8") as f:
-        json.dump(practices, f, ensure_ascii=False, indent=2)
+def _banner_lines(port: int) -> list[str]:
+    openai_state = (
+        "configurato"
+        if settings_service.get_openai_api_key()
+        else "NON configurato (impostalo dalle impostazioni o nel file .env)"
+    )
+    return [
+        "",
+        f"  {config.APP_NAME} v{config.APP_VERSION}",
+        f"  URL:        http://localhost:{port}",
+        f"  Utente:     {settings_service.get('general.user_name', '') or '-'}",
+        f"  Dati:       {config.data_dir()}",
+        f"  OpenAI:     {openai_state}",
+        f"  GitHub:     {_integration_state(github_service.is_connected)}",
+        f"  Microsoft:  {_integration_state(graph_service.is_connected)}",
+        "",
+    ]
 
 
-# ---- Flask App ----
-
-app = Flask(__name__, template_folder="templates")
-
-
-@app.after_request
-def no_cache(response):
-    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    response.headers["Pragma"] = "no-cache"
-    response.headers["Expires"] = "0"
-    return response
-
-
-# ---- UI ----
-
-@app.route("/")
-def index():
-    return render_template("index.html")
-
-
-# ---- Config ----
-
-def _meeting_provider():
-    """Pick the calendar backend.
-
-    Priority: n8n (explicit opt-in via N8N_MEETINGS_URL) > COM (local Windows)
-    > Microsoft Graph (Docker/server) > none.
-    """
-    if n8n_meetings_service.is_configured():
-        return "n8n"
-    if outlook_service.is_available():
-        return "com"
-    if graph_service.is_configured():
-        return "graph"
-    return "none"
-
-
-@app.route("/api/config")
-def api_config():
-    provider = _meeting_provider()
-    if provider in ("com", "n8n"):
-        authenticated = True
-    elif provider == "graph":
-        authenticated = graph_service.is_authenticated()
-    else:
-        authenticated = False
-    return jsonify({
-        "user_name": USER_NAME,
-        "outlook_available": outlook_service.is_available(),  # legacy
-        "meetings_available": provider != "none",
-        "meetings_provider": provider,
-        "meetings_authenticated": authenticated,
-        "webhook_enabled": webhook_service.is_webhook_enabled(),
-    })
-
-
-@app.route("/api/meetings/auth-status")
-def api_meetings_auth_status():
-    if not graph_service.is_configured():
-        return jsonify({"configured": False, "authenticated": False, "pending": False})
-    return jsonify(graph_service.auth_status())
-
-
-# ---- History ----
-
-@app.route("/api/days")
-def api_days():
-    return jsonify({"days": state_service.list_days()})
-
-
-# ---- Entries ----
-
-def _req_date():
-    """Read the selected day from query string or JSON body (default: today)."""
-    date = request.args.get("date")
-    if not date:
-        body = request.get_json(silent=True) or {}
-        date = body.get("date")
-    return date  # state_service falls back to today when None/invalid
-
-
-@app.route("/api/entries")
-def api_entries():
-    return jsonify({"entries": state_service.get_entries(date=_req_date())})
-
-
-@app.route("/api/entry", methods=["POST"])
-def api_entry_add():
-    data = request.get_json(silent=True) or {}
-    text = (data.get("text") or "").strip()
-    if not text:
-        return jsonify({"success": False, "error": "Testo vuoto"}), 400
-    entry = state_service.add_entry(text, entry_type="manual", date=data.get("date"))
-    return jsonify({"success": True, "entry": entry})
-
-
-@app.route("/api/entry/<entry_id>", methods=["DELETE"])
-def api_entry_delete(entry_id):
-    removed = state_service.remove_entry(entry_id, date=_req_date())
-    if not removed:
-        return jsonify({"success": False, "error": "Entry non trovata"}), 404
-    return jsonify({"success": True})
-
-
-@app.route("/api/entry/<entry_id>", methods=["PUT"])
-def api_entry_update(entry_id):
-    data = request.get_json(silent=True) or {}
-    new_text = (data.get("text") or "").strip()
-    if not new_text:
-        return jsonify({"success": False, "error": "Testo vuoto"}), 400
-    updated = state_service.update_entry(entry_id, new_text, date=data.get("date"))
-    if not updated:
-        return jsonify({"success": False, "error": "Entry non trovata"}), 404
-    return jsonify({"success": True, "entry": updated})
-
-
-# ---- Outlook ----
-
-@app.route("/api/outlook", methods=["POST"])
-def api_outlook():
-    date = _req_date()
-    provider = _meeting_provider()
-
-    if provider == "none":
-        return jsonify({"success": False, "error": "Nessuna integrazione calendario disponibile"}), 400
-
-    if provider == "n8n":
-        meetings, error = n8n_meetings_service.get_meetings(
-            target_date=state_service.resolve_date(date)
-        )
-    elif provider == "com":
-        meetings, error = outlook_service.get_outlook_meetings()
-    else:  # graph
-        meetings, error = graph_service.get_meetings(target_date=state_service.resolve_date(date))
-
-    if error == graph_service.AUTH_REQUIRED:
-        device = graph_service.start_device_login()
-        if not device:
-            return jsonify({"success": False, "error": "Impossibile avviare il login Microsoft."}), 400
-        return jsonify({"success": False, "auth_required": True, "device": device}), 401
-
-    if error:
-        return jsonify({"success": False, "error": error}), 400
-
-    new_count = 0
-    skipped_count = 0
-
-    for m in (meetings or []):
-        mid = m["meeting_id"]
-        if state_service.is_meeting_imported(mid, date=date):
-            skipped_count += 1
-            continue
-        state_service.add_entry(
-            text=m["subject"],
-            entry_type="outlook",
-            duration_min=m["duration"],
-            meeting_id=mid,
-            date=date,
-        )
-        state_service.mark_meeting_imported(mid, date=date)
-        new_count += 1
-
-    return jsonify({
-        "success": True,
-        "new": new_count,
-        "skipped": skipped_count,
-        "entries": state_service.get_entries(date=date),
-    })
-
-
-# ---- Elaborate ----
-
-@app.route("/api/elaborate", methods=["POST"])
-def api_elaborate():
-    date = _req_date()
-    entries = state_service.get_entries(date=date)
-    if not entries:
-        return jsonify({"success": False, "error": "Nessuna attività da elaborare"}), 400
-
-    practices = load_practices()
-    elab_date = state_service.resolve_date(date)
-
+def _open_browser(port: int) -> None:
+    url = f"http://localhost:{port}"
     try:
-        result = ai_service.elaborate_timesheet(
-            entries=entries,
-            user_name=USER_NAME,
-            date=elab_date,
-            practices=practices,
-        )
-    except ValueError as e:
-        return jsonify({"success": False, "error": str(e)}), 400
-    except Exception as e:
-        try:
-            from openai import AuthenticationError, APIConnectionError, APIStatusError
-        except Exception:
-            AuthenticationError = APIConnectionError = APIStatusError = tuple()
-
-        if AuthenticationError and isinstance(e, AuthenticationError):
-            return jsonify({
-                "success": False,
-                "error": "OpenAI API key non valida o non piu' attiva. Verifica OPENAI_API_KEY nel file .env.",
-            }), 401
-
-        if APIConnectionError and isinstance(e, APIConnectionError):
-            return jsonify({
-                "success": False,
-                "error": "Impossibile contattare OpenAI. Controlla connessione, proxy o firewall.",
-            }), 502
-
-        if APIStatusError and isinstance(e, APIStatusError):
-            return jsonify({
-                "success": False,
-                "error": f"OpenAI ha restituito un errore API ({getattr(e, 'status_code', 'sconosciuto')}).",
-            }), 502
-
-        app.logger.exception("Errore inatteso durante l'elaborazione AI")
-        return jsonify({"success": False, "error": f"Errore AI: {e}"}), 500
-
-    state_service.set_elaboration(result, date=date)
-
-    # Optionally send to webhook
-    if webhook_service.is_webhook_enabled():
-        payload = {
-            "date": elab_date,
-            "user": USER_NAME,
-            "type": "elaborated_timesheet",
-            "result": result,
-        }
-        webhook_service.send_to_webhook(payload)
-
-    return jsonify({"success": True, "result": result})
+        webbrowser.open(url)
+    except Exception as exc:  # noqa: BLE001 - purely a convenience feature
+        logger.warning("Impossibile aprire il browser su %s: %s", url, exc)
 
 
-@app.route("/api/elaborate", methods=["GET"])
-def api_elaborate_get():
-    return jsonify(state_service.get_elaboration(date=_req_date()))
-
-
-# ---- Practices CRUD ----
-
-@app.route("/api/practices", methods=["GET"])
-def api_practices_get():
-    return jsonify({"practices": load_practices()})
-
-
-@app.route("/api/practices", methods=["POST"])
-def api_practices_add():
-    data = request.get_json(silent=True) or {}
-    code = (data.get("code") or "").strip()
-    name = (data.get("name") or "").strip()
-    description = (data.get("description") or "").strip()
-
-    if not code or not name:
-        return jsonify({"success": False, "error": "Codice e nome sono obbligatori"}), 400
-
-    practices = load_practices()
-    if any(p["code"] == code for p in practices):
-        return jsonify({"success": False, "error": f"Pratica {code} già esistente"}), 400
-
-    practices.append({"code": code, "name": name, "description": description})
-    save_practices(practices)
-    return jsonify({"success": True, "practices": practices})
-
-
-@app.route("/api/practices/<code>", methods=["PUT"])
-def api_practices_update(code):
-    data = request.get_json(silent=True) or {}
-    practices = load_practices()
-    for p in practices:
-        if p["code"] == code:
-            p["name"] = (data.get("name") or p["name"]).strip()
-            p["description"] = (data.get("description") or p.get("description", "")).strip()
-            save_practices(practices)
-            return jsonify({"success": True, "practices": practices})
-    return jsonify({"success": False, "error": f"Pratica {code} non trovata"}), 404
-
-
-@app.route("/api/practices/<code>", methods=["DELETE"])
-def api_practices_delete(code):
-    practices = load_practices()
-    new_list = [p for p in practices if p["code"] != code]
-    if len(new_list) == len(practices):
-        return jsonify({"success": False, "error": f"Pratica {code} non trovata"}), 404
-    save_practices(new_list)
-    return jsonify({"success": True, "practices": new_list})
-
-
-# ---- Webhook callbacks (only active when ENABLE_WEBHOOK=true) ----
-
-_callback_messages = []
-
-
-@app.route("/api/callback", methods=["POST"])
-def api_callback():
-    if not webhook_service.is_webhook_enabled():
-        return jsonify({"ok": False, "error": "Webhook disabilitato"}), 403
-    data = request.get_json(silent=True) or {}
-    now = datetime.datetime.now()
-    msg = {"timestamp": now.isoformat(), "time": now.strftime("%H:%M"), "data": data, "read": False}
-    _callback_messages.append(msg)
-    print(f"[CALLBACK] Ricevuto da webhook: {json.dumps(data, ensure_ascii=False)[:200]}")
-    return jsonify({"ok": True}), 200
-
-
-@app.route("/api/callbacks", methods=["GET"])
-def api_callbacks():
-    if not webhook_service.is_webhook_enabled():
-        return jsonify({"messages": []})
-    unread = [m for m in _callback_messages if not m["read"]]
-    for m in unread:
-        m["read"] = True
-    return jsonify({"messages": unread})
-
-
-# ---- Main ----
-
-def _open_browser():
-    webbrowser.open(f"http://localhost:{APP_PORT}")
+def main() -> None:
+    app = create_app()
+    port = config.app_port()
+    print("\n".join(_banner_lines(port)))
+    if config.auto_open_browser():
+        threading.Timer(BROWSER_OPEN_DELAY_S, _open_browser, args=(port,)).start()
+    app.run(host=config.app_host(), port=port, debug=False)
 
 
 if __name__ == "__main__":
-    print(f"\n  TimeSheet App v2")
-    print(f"  http://localhost:{APP_PORT}")
-    print(f"  Utente: {USER_NAME}")
-    _prov = _meeting_provider()
-    _prov_label = {
-        "n8n": "n8n (webhook Microsoft)",
-        "com": "Outlook desktop (COM)",
-        "graph": "Microsoft Graph (cloud)",
-        "none": "nessuna",
-    }[_prov]
-    print(f"  Riunioni: {_prov_label}")
-    print(f"  Webhook: {'abilitato' if webhook_service.is_webhook_enabled() else 'disabilitato'}")
-    print(f"  OpenAI: {'configurato' if os.getenv('OPENAI_API_KEY') else 'NON configurato (imposta OPENAI_API_KEY nel .env)'}")
-    print()
-    if AUTO_OPEN_BROWSER:
-        threading.Timer(1.5, _open_browser).start()
-    app.run(host="0.0.0.0", port=APP_PORT, debug=False)
+    main()

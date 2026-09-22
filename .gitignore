@@ -1,47 +1,55 @@
-# ── Python ──────────────────────────────────────────
+# ---- Python ----
 __pycache__/
 *.py[cod]
+*$py.class
 *.pyo
 *.pyd
-*.pyc
 *.egg
 *.egg-info/
 dist/
 build/
 *.spec
 
-# ── Virtualenv ───────────────────────────────────────
+# ---- Virtualenv ----
 venv/
 .venv/
 env/
 .env/
 ENV/
 
-# ── Secrets / Config locali ──────────────────────────
-.env
+# ---- Tests / coverage ----
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
 
-# ── Stato interno dell'app ───────────────────────────
+# ---- Secrets & local configuration (never commit) ----
+.env
+.env.local
+.env.*.local
+secrets.json
+settings.json
+
+# ---- Application data (runtime state, daily history, token caches) ----
+data/
 .timesheet_state.json
 .timesheet_history/
 .graph_token_cache.bin
-data/
 
-# ── OS ───────────────────────────────────────────────
-.DS_Store
-Thumbs.db
-desktop.ini
-
-# ── Editor ───────────────────────────────────────────
+# ---- Tooling / editors ----
+.claude/
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# ── Logs ─────────────────────────────────────────────
+# ---- OS ----
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- Logs ----
 *.log
 logs/
-
-
-
-.claude

@@ -1,21 +1,51 @@
+# ---- VCS / tooling (never needed inside the image) ----
 .git
+.gitignore
+.gitattributes
 .claude
+.vscode/
+.idea/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# ---- Python build artefacts / virtualenvs ----
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
-.env
-.timesheet_state.json
-.timesheet_history/
-.graph_token_cache.bin
 venv/
 .venv/
 env/
 ENV/
+
+# ---- Local configuration & secrets: NEVER baked into the image ----
+# .env is injected at runtime by docker-compose (env_file), data/ is a volume.
+.env
+.env.*
 data/
+settings.json
+secrets.json
+.timesheet_state.json
+.timesheet_history/
+.graph_token_cache.bin
+
+# ---- Not needed at runtime ----
+tests/
+docs/
+*.md
+*.bat
+*.jpeg
+*.jpg
+*.png
+Dockerfile
+docker-compose.yml
 logs/
 *.log
-.vscode/
-.idea/
+
+# ---- OS noise ----
+.DS_Store
 Thumbs.db
 desktop.ini

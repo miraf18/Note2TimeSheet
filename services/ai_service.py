@@ -1,201 +1,455 @@
-"""
-AI Service — elaborazione timesheet tramite OpenAI GPT-4.1-mini.
-Classificazione automatica per pratica, bilanciamento garantito a 8.00 ore.
+"""AI service: prompt templates with placeholders, OpenAI call, output validation and balancing.
+
+The prompt is made of four editable sections (``DEFAULT_PROMPTS``); ``None`` or an
+empty string in the user's settings means "use the built-in default". Placeholders
+use double braces (``{{daily_hours}}``) and are replaced by plain string
+substitution so JSON braces inside the templates are safe.
 """
 
-import os
+from __future__ import annotations
+
 import json
+import logging
 import re
+from typing import Any
+
+import config
+
+logger = logging.getLogger(__name__)
+
+PROMPT_FIELDS = ("system_intro", "system_rules", "system_output", "user_template")
+SYSTEM_FIELDS = ("system_intro", "system_rules", "system_output")
+SECTION_SEPARATOR = "\n\n"
+MIN_ITEM_HOURS = 0.25
+HOURS_EPSILON = 1e-6
+DEFAULT_TEMPERATURE = 0.2
+MAX_TOKENS = 1500
+MAX_COMMIT_LINES = 30
+MAX_COMMIT_MESSAGE_LEN = 120
+EMPTY_DESCRIPTION = "Attività non descritta."
+NO_PRACTICES_TEXT = "(nessuna pratica configurata)"
+NO_ENTRIES_TEXT = "(nessuna attività)"
+RETRY_INSTRUCTION = "\n\nIMPORTANTE: rispondi SOLO con JSON valido. Nessun testo, nessun markdown."
+_PLACEHOLDER_RE = re.compile(r"\{\{\s*(\w+)\s*\}\}")
+_REPO_PREFIX_RE = re.compile(r"^[\w.-]+/[\w.-]+\s+·\s+")
+_FENCE_RE = re.compile(r"```(?:json)?", re.IGNORECASE)
+
+DEFAULT_PROMPTS: dict[str, str] = {
+    "system_intro": (
+        "Sei un assistente specializzato nella compilazione di timesheet aziendali.\n\n"
+        "Il tuo compito è ricevere l'elenco delle attività svolte durante la giornata e produrre "
+        "un timesheet strutturato, classificando ogni voce con il codice pratica più appropriato.\n\n"
+        "CODICI PRATICA DISPONIBILI:\n{{practices}}"
+    ),
+    "system_rules": (
+        "REGOLE TASSATIVE:\n"
+        "1. Il totale delle ore DEVE essere ESATTAMENTE {{daily_hours}} ore ({{daily_minutes}} minuti). "
+        "Mai di più, mai di meno.\n"
+        "2. Ogni voce deve essere classificata con uno dei codici pratica disponibili: {{codes}}\n"
+        "3. Scegli il codice più appropriato in base alla descrizione dell'attività e alle tipologie elencate.\n"
+        "4. Raggruppa le attività simili sotto la stessa pratica: se più attività hanno lo stesso codice, "
+        "uniscile in un'unica voce con le ore sommate e una descrizione che le riassuma tutte. "
+        "Esempio: \"Sviluppo e test dei moduli di autenticazione OAuth2, Single Sign-On e gestione "
+        "sessioni per il portale aziendale.\"\n"
+        "5. Arrotonda le ore in incrementi di 0.25h (15 minuti). Valori ammessi: 0.25, 0.50, 0.75, 1.00, 1.25, ecc.\n"
+        "6. Le descrizioni devono essere brevi ma complete, professionali e in italiano. Ogni descrizione DEVE "
+        "iniziare con la lettera maiuscola e terminare con il punto. Esempio corretto: \"Sviluppo e test del "
+        "modulo di autenticazione OAuth2 per l'integrazione con il portale aziendale.\" "
+        "Esempio sbagliato: \"sviluppo autenticazione\"\n"
+        "7. Le riunioni (voci contrassegnate con [Riunione]) hanno una durata nota in minuti: usala come "
+        "riferimento preciso. La descrizione di ogni riunione DEVE iniziare con \"Riunione:\" "
+        "(esempio: \"Riunione: allineamento settimanale con il team di sviluppo.\").\n"
+        "8. Le voci GitHub (commit e pull request) rappresentano lavoro di sviluppo: usa i messaggi di commit "
+        "per descrivere cosa è stato fatto, raggruppando per repository o argomento. Non riportare mai "
+        "hash, SHA o URL nella descrizione.\n"
+        "9. Distribuisci il tempo rimanente (dopo le riunioni) tra le altre attività in modo proporzionale "
+        "e ragionevole.\n"
+        "10. Se il totale supera {{daily_hours}} ore, comprimi proporzionalmente le voci che non sono riunioni."
+    ),
+    "system_output": (
+        "FORMATO OUTPUT — rispondi ESCLUSIVAMENTE con JSON valido, nessun testo extra, nessun markdown:\n"
+        "{\n"
+        "  \"timesheet\": [\n"
+        "    {\n"
+        "      \"pratica\": \"299111\",\n"
+        "      \"ore\": 2.50,\n"
+        "      \"descrizione\": \"Sviluppo e test delle API REST per il modulo di autenticazione OAuth2 "
+        "del portale aziendale.\"\n"
+        "    }\n"
+        "  ],\n"
+        "  \"totale_ore\": {{daily_hours}},\n"
+        "  \"note\": \"\"\n"
+        "}"
+    ),
+    "user_template": (
+        "Data: {{date}}\n"
+        "Utente: {{user_name}}\n\n"
+        "ATTIVITÀ DELLA GIORNATA:\n"
+        "{{entries}}\n\n"
+        "Elabora il timesheet. Il totale DEVE essere esattamente {{daily_hours}} ore."
+    ),
+}
+
+PLACEHOLDERS: list[dict[str, str]] = [
+    {"name": "practices", "token": "{{practices}}",
+     "description": "Elenco delle pratiche, una per riga: - codice (nome): descrizione"},
+    {"name": "codes", "token": "{{codes}}", "description": "Codici pratica separati da virgola"},
+    {"name": "daily_hours", "token": "{{daily_hours}}", "description": "Ore giornaliere da raggiungere (es. 8.00)"},
+    {"name": "daily_minutes", "token": "{{daily_minutes}}", "description": "Minuti giornalieri (es. 480)"},
+    {"name": "user_name", "token": "{{user_name}}", "description": "Nome dell'utente"},
+    {"name": "date", "token": "{{date}}", "description": "Data del giorno elaborato (YYYY-MM-DD)"},
+    {"name": "entries", "token": "{{entries}}", "description": "Attività della giornata già formattate"},
+]
 
 
-def _load_practices():
-    """Load practices from practices.json."""
-    base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    path = os.path.join(base, "practices.json")
+def reset_cache() -> None:
+    """No in-memory cache is kept; present for the shared test fixture contract."""
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Prompt sections & placeholders
+# ---------------------------------------------------------------------------
+
+def effective_prompts(ai_settings: dict | None) -> dict[str, str]:
+    """The four prompt sections actually used (``None``/blank → built-in default)."""
+    settings = ai_settings if isinstance(ai_settings, dict) else {}
+    return {field: _section_or_default(field, settings.get(field)) for field in PROMPT_FIELDS}
+
+
+def _section_or_default(field: str, value: Any) -> str:
+    if isinstance(value, str) and value.strip():
+        return value
+    return DEFAULT_PROMPTS[field]
+
+
+def format_hours(hours: Any) -> str:
+    return f"{float(hours):.2f}"
+
+
+def daily_minutes(hours: Any) -> int:
+    return int(round(float(hours) * 60))
+
+
+def render_practices(practices: list[dict]) -> str:
+    lines = [_render_practice(p) for p in practices or [] if isinstance(p, dict)]
+    return "\n".join(lines) if lines else NO_PRACTICES_TEXT
+
+
+def _render_practice(practice: dict) -> str:
+    head = f"- {practice.get('code', '')} ({practice.get('name', '')})"
+    description = " ".join(str(practice.get("description") or "").split())
+    return f"{head}: {description}" if description else head
+
+
+def render_codes(practices: list[dict]) -> str:
+    return ", ".join(str(p.get("code", "")) for p in practices or [] if isinstance(p, dict) and p.get("code"))
+
+
+def placeholder_values(entries: list[dict], practices: list[dict], user_name: str,
+                       date: str, daily_hours: float) -> dict[str, str]:
+    return {
+        "practices": render_practices(practices),
+        "codes": render_codes(practices),
+        "daily_hours": format_hours(daily_hours),
+        "daily_minutes": str(daily_minutes(daily_hours)),
+        "user_name": str(user_name or ""),
+        "date": str(date or ""),
+        "entries": render_entries(entries),
+    }
+
+
+def fill_placeholders(template: str, values: dict[str, str]) -> str:
+    """Replace ``{{name}}`` tokens (unknown names are left untouched)."""
+    return _PLACEHOLDER_RE.sub(lambda m: values.get(m.group(1), m.group(0)), template or "")
+
+
+def build_prompts(entries: list[dict], practices: list[dict], user_name: str, date: str,
+                  daily_hours: float, ai_settings: dict | None) -> tuple[str, str]:
+    """Return ``(system_prompt, user_prompt)`` with all placeholders filled."""
+    prompts = effective_prompts(ai_settings)
+    values = placeholder_values(entries, practices, user_name, date, daily_hours)
+    system_prompt = SECTION_SEPARATOR.join(fill_placeholders(prompts[f], values) for f in SYSTEM_FIELDS)
+    return system_prompt, fill_placeholders(prompts["user_template"], values)
+
+
+# ---------------------------------------------------------------------------
+# Entry rendering
+# ---------------------------------------------------------------------------
+
+def _first_line(message: Any, limit: int = MAX_COMMIT_MESSAGE_LEN) -> str:
+    lines = [line.strip() for line in str(message or "").splitlines() if line.strip()]
+    first = lines[0] if lines else ""
+    return first if len(first) <= limit else first[: limit - 1].rstrip() + "…"
+
+
+def _render_manual(entry: dict) -> str:
+    lines = [line.strip() for line in str(entry.get("text") or "").splitlines() if line.strip()] or [""]
+    head = f"- [{entry.get('time') or ''}] {lines[0]}"
+    return "\n".join([head, *(f"    {line}" for line in lines[1:])])
+
+
+def _render_meeting(entry: dict) -> str:
+    meta = entry.get("meta") if isinstance(entry.get("meta"), dict) else {}
+    start, end = meta.get("start"), meta.get("end")
+    when = f"{start}–{end}" if start and end else (entry.get("time") or "")
+    text = " ".join(str(entry.get("text") or "").split())
+    if text.lower().startswith("riunione:"):
+        text = text[len("riunione:"):].strip()
+    duration = entry.get("duration_min")
+    duration_part = f" (durata: {int(duration)} min)" if isinstance(duration, (int, float)) and duration else ""
+    return f"- [{when}] Riunione: {text}{duration_part} [Riunione]"
+
+
+def _render_commits(repo: str, commits: list) -> str:
+    shown = [c for c in commits[:MAX_COMMIT_LINES] if isinstance(c, dict)]
+    lines = [f"    • {_first_line(c.get('message'))}" for c in shown]
+    if len(commits) > MAX_COMMIT_LINES:
+        lines.append(f"    • … e altri {len(commits) - MAX_COMMIT_LINES}")
+    return "\n".join([f"- [GitHub {repo}] {len(commits)} commit:", *lines])
+
+
+def _render_github(entry: dict) -> str:
+    meta = entry.get("meta") if isinstance(entry.get("meta"), dict) else {}
+    repo = str(meta.get("repo") or "GitHub")
+    commits = meta.get("commits")
+    if meta.get("kind") == "commits" and isinstance(commits, list) and commits:
+        return _render_commits(repo, commits)
+    text = " ".join(str(entry.get("text") or "").split())
+    if text.startswith(f"{repo} · "):
+        text = text[len(repo) + 3:]
+    return f"- [GitHub {repo}] {_REPO_PREFIX_RE.sub('', text)}"
+
+
+def render_entries(entries: list[dict]) -> str:
+    """One block per entry, in the format the prompt rules refer to."""
+    renderers = {"meeting": _render_meeting, "outlook": _render_meeting, "github": _render_github}
+    rendered = [renderers.get(str(e.get("type")), _render_manual)(e) for e in entries or [] if isinstance(e, dict)]
+    return "\n".join(rendered) if rendered else NO_ENTRIES_TEXT
+
+
+# ---------------------------------------------------------------------------
+# Balancing (pure)
+# ---------------------------------------------------------------------------
+
+def round_quarter(value: Any) -> float:
+    """Round to the nearest 0.25."""
+    return round(round(float(value) * 4) / 4, 2)
+
+
+def _hours_of(item: dict) -> float:
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return [
-            {"code": "6450", "name": "Sviluppo IT", "description": "Programmazione e sviluppo software"},
-            {"code": "6447", "name": "Supporto IT", "description": "Assistenza e supporto utenti"},
-        ]
+        return float(item.get("ore", 0))
+    except (TypeError, ValueError):
+        return 0.0
 
 
-def _build_system_prompt(practices):
-    practices_block = "\n".join(
-        f"  - {p['code']} ({p['name']}): {p['description']}"
-        for p in practices
-    )
-    codes_list = ", ".join(p["code"] for p in practices)
+def balance_to_total(items: list[dict], total_hours: float) -> list[dict]:
+    """Return new items whose ``ore`` sum to ``total_hours`` (quarter-hour steps, min 0.25 each).
 
-    return f"""Sei un assistente specializzato nella compilazione di timesheet aziendali.
-
-Il tuo compito è ricevere una lista di attività svolte durante la giornata e produrre un timesheet strutturato.
-
-CODICI PRATICA DISPONIBILI:
-{practices_block}
-
-REGOLE TASSATIVE:
-1. Il totale delle ore DEVE essere ESATTAMENTE 8.00 ore (480 minuti). Mai di più, mai di meno.
-2. Ogni voce deve essere classificata con uno dei codici pratica disponibili: {codes_list}
-3. Scegli il codice più appropriato in base alla descrizione dell'attività e alle tipologie elencate.
-4. Raggruppa attività simili sotto la stessa pratica quando ha senso.
-5. Arrotonda le ore in incrementi di 0.25h (15 min). Valori ammessi: 0.25, 0.50, 0.75, 1.00, 1.25, ecc.
-6. Le descrizioni devono essere brevi ma complete. Professionali in italiano. Ogni descrizione DEVE iniziare con la lettera maiuscola e terminare con il punto. Esempio corretto: "Sviluppo e test del modulo di autenticazione OAuth2 per l'integrazione con il portale aziendale." Esempio sbagliato: "sviluppo autenticazione"
-6.1. Metti inisieme attività similli, se ci sono 3 attività simili con lo stesso numero di pratica, raggruppale in un'unica voce con ore sommate e descrizione che riassume tutte e 3. Esempio: "Sviluppo e test dei moduli di autenticazione OAuth2, Single Sign-On e gestione sessioni per il portale aziendale."
-7. Le riunioni Outlook hanno una durata nota in minuti: usala come riferimento preciso. Voglio che le riunioni vengano salvate con "Riunioni:...".
-8. Distribuisci il tempo rimanente (dopo le riunioni) tra le attività manuali in modo proporzionale e ragionevole.
-9. Se il totale supera 8 ore, comprimi proporzionalmente le voci senza riunioni. 
-
-FORMATO OUTPUT — rispondi ESCLUSIVAMENTE con JSON valido, nessun testo extra, nessun markdown:
-{{
-  "timesheet": [
-    {{
-      "pratica": "6450",
-      "ore": 2.50,
-      "descrizione": "Sviluppo e test delle API REST per il modulo di autenticazione OAuth2 del portale aziendale."
-    }}
-  ],
-  "totale_ore": 8.00,
-  "note": ""
-}}"""
-
-
-def _round_quarter(value):
-    """Round to nearest 0.25."""
-    return round(round(value * 4) / 4, 2)
-
-
-def _balance_to_8h(items):
+    Every item is first rounded to a quarter; the difference is applied to the
+    largest item, cascading to the next ones when an item would drop below 0.25.
     """
-    Enforce exactly 8.00h total by adjusting the largest item.
-    Operates on a copy of the list.
-    """
-    items = [dict(i) for i in items]
-    total = sum(i["ore"] for i in items)
-    delta = round(8.0 - total, 4)
-
-    if abs(delta) < 0.001:
-        return items
-
-    # Sort indices by ore descending to find best candidate to adjust
-    sorted_idx = sorted(range(len(items)), key=lambda i: items[i]["ore"], reverse=True)
-
-    for idx in sorted_idx:
-        new_val = _round_quarter(items[idx]["ore"] + delta)
-        if new_val >= 0.25:
-            items[idx]["ore"] = new_val
+    total = float(total_hours)
+    if total <= 0:
+        raise ValueError("Il totale ore deve essere maggiore di zero.")
+    if not items:
+        return []
+    hours = [max(MIN_ITEM_HOURS, round_quarter(_hours_of(item))) for item in items]
+    remaining = round(total - sum(hours), 4)
+    for idx in sorted(range(len(hours)), key=lambda i: hours[i], reverse=True):
+        if abs(remaining) < HOURS_EPSILON:
             break
-    else:
-        # Edge case: add to first item regardless
-        items[0]["ore"] = _round_quarter(max(0.25, items[0]["ore"] + delta))
-
-    return items
-
-
-def _parse_json_response(text):
-    """Strip markdown fences if present and parse JSON."""
-    text = re.sub(r"```(?:json)?\s*", "", text, flags=re.IGNORECASE).strip().rstrip("`").strip()
-    return json.loads(text)
+        target = max(MIN_ITEM_HOURS, round_quarter(hours[idx] + remaining))
+        remaining = round(remaining - (target - hours[idx]), 4)
+        hours[idx] = target
+    if abs(remaining) >= HOURS_EPSILON:
+        logger.warning("Cannot balance timesheet exactly to %.2f h (residual %.2f h)", total, remaining)
+    return [{**item, "ore": round(h, 2)} for item, h in zip(items, hours)]
 
 
-def elaborate_timesheet(entries, user_name, date, practices=None):
-    """
-    Elaborate freeform entries into a structured timesheet using GPT-4.1-mini.
+# ---------------------------------------------------------------------------
+# OpenAI call
+# ---------------------------------------------------------------------------
 
-    Args:
-        entries: list of entry dicts (from state_service)
-        user_name: str
-        date: str (YYYY-MM-DD)
-        practices: list of practice dicts (loaded from practices.json if None)
+def _temperature(ai_settings: dict | None) -> float:
+    value = (ai_settings or {}).get("temperature", DEFAULT_TEMPERATURE) if isinstance(ai_settings, dict) else None
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= 2:
+        return float(value)
+    if value is not None:
+        logger.warning("Invalid AI temperature %r, using %.1f", value, DEFAULT_TEMPERATURE)
+    return DEFAULT_TEMPERATURE
 
-    Returns:
-        dict with keys: timesheet (list), totale_ore (float), note (str)
 
-    Raises:
-        ValueError: if API key missing, entries empty, or AI response invalid after retry
-    """
-    from openai import OpenAI
+def _is_response_format_rejection(exc: Exception) -> bool:
+    try:
+        from openai import BadRequestError
+    except ImportError:
+        return False
+    return isinstance(exc, BadRequestError) and "response_format" in str(exc).lower()
 
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
-    if not api_key:
-        raise ValueError("OPENAI_API_KEY non configurato nel .env")
 
+def _complete(client: Any, model: str, system_prompt: str, user_prompt: str, temperature: float) -> str:
+    """One chat completion; falls back to no ``response_format`` when unsupported."""
+    kwargs = {
+        "model": model,
+        "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
+        "temperature": temperature,
+        "max_tokens": MAX_TOKENS,
+    }
+    try:
+        response = client.chat.completions.create(response_format={"type": "json_object"}, **kwargs)
+    except TypeError:
+        logger.info("response_format not supported by the OpenAI SDK; retrying without it")
+        response = client.chat.completions.create(**kwargs)
+    except Exception as exc:
+        if not _is_response_format_rejection(exc):
+            raise
+        logger.info("Model %s rejected response_format; retrying without it", model)
+        response = client.chat.completions.create(**kwargs)
+    return _response_text(response)
+
+
+def _response_text(response: Any) -> str:
+    try:
+        content = response.choices[0].message.content
+    except (AttributeError, IndexError, TypeError) as exc:
+        raise ValueError("Risposta AI vuota o in un formato inatteso.") from exc
+    return (content or "").strip()
+
+
+def _try_parse(raw: str) -> dict | None:
+    """Parse the model output as a JSON object; ``None`` when impossible."""
+    cleaned = _FENCE_RE.sub("", raw or "").strip().strip("`").strip()
+    for candidate in (cleaned, _extract_object(cleaned)):
+        if not candidate:
+            continue
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    return None
+
+
+def _extract_object(text: str) -> str:
+    start, end = text.find("{"), text.rfind("}")
+    return text[start:end + 1] if 0 <= start < end else ""
+
+
+# ---------------------------------------------------------------------------
+# Output validation
+# ---------------------------------------------------------------------------
+
+def format_description(text: Any) -> str:
+    """Capitalise the first letter and make sure the sentence ends with a period."""
+    clean = " ".join(str(text or "").split())
+    if not clean:
+        return EMPTY_DESCRIPTION
+    clean = clean[0].upper() + clean[1:]
+    return clean if clean[-1] in ".!?" else clean + "."
+
+
+def _parse_hours(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        return float(str(value).strip().replace(",", ".")) if isinstance(value, str) else float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalise_item(item: Any, index: int) -> dict | None:
+    if not isinstance(item, dict):
+        logger.warning("Skipping AI timesheet item #%d: not an object", index)
+        return None
+    hours = _parse_hours(item.get("ore"))
+    if hours is None or hours <= 0:
+        logger.warning("Skipping AI timesheet item #%d: invalid hours %r", index, item.get("ore"))
+        return None
+    return {
+        "pratica": str(item.get("pratica") or "").strip(),
+        "ore": hours,
+        "descrizione": format_description(item.get("descrizione")),
+    }
+
+
+def _compose_note(ai_note: Any, unknown_codes: list[str]) -> str:
+    base = " ".join(str(ai_note).split()) if isinstance(ai_note, str) else ""
+    flags = [f"Codice {code} non presente nell'elenco pratiche." for code in unknown_codes]
+    return " ".join(part for part in [base, *flags] if part)
+
+
+def _finalise(parsed: dict, practices: list[dict], daily_hours: float) -> dict:
+    timesheet = parsed.get("timesheet")
+    if not isinstance(timesheet, list) or not timesheet:
+        raise ValueError("Struttura della risposta AI non valida: manca l'elenco 'timesheet'.")
+    items = [i for i in (_normalise_item(item, n) for n, item in enumerate(timesheet)) if i]
+    if not items:
+        raise ValueError("L'AI ha restituito un timesheet senza voci valide.")
+    known = {str(p.get("code")) for p in practices if isinstance(p, dict)}
+    unknown = list(dict.fromkeys(i["pratica"] for i in items if i["pratica"] not in known))
+    if unknown:
+        logger.warning("AI used unknown practice codes: %s", ", ".join(unknown))
+    balanced = balance_to_total(items, daily_hours)
+    return {
+        "timesheet": balanced,
+        "totale_ore": round(sum(i["ore"] for i in balanced), 2),
+        "note": _compose_note(parsed.get("note"), unknown),
+    }
+
+
+def _check_inputs(entries: list, practices: list, daily_hours: Any, api_key: Any) -> None:
+    if not isinstance(api_key, str) or not api_key.strip():
+        raise ValueError("Chiave API OpenAI non configurata. Inseriscila nelle impostazioni "
+                         "oppure nella variabile OPENAI_API_KEY.")
     if not entries:
         raise ValueError("Nessuna attività da elaborare. Aggiungi almeno una voce.")
-
-    if practices is None:
-        practices = _load_practices()
-
-    client = OpenAI(api_key=api_key)
-    system_prompt = _build_system_prompt(practices)
-
-    # Build user prompt
-    lines = []
-    for e in entries:
-        line = f"- [{e['time']}] {e['text']}"
-        if e.get("duration_min"):
-            line += f" (durata: {e['duration_min']} min)"
-        if e.get("type") == "outlook":
-            line += " [Riunione Outlook]"
-        lines.append(line)
-
-    user_prompt = (
-        f"Data: {date}\n"
-        f"Utente: {user_name}\n\n"
-        f"ATTIVITÀ DELLA GIORNATA:\n"
-        + "\n".join(lines)
-        + "\n\nElabora il timesheet. Il totale DEVE essere esattamente 8.00 ore."
-    )
-
-    def _call(extra=""):
-        response = client.chat.completions.create(
-            model="gpt-4.1-mini",
-            messages=[
-                {"role": "system", "content": system_prompt + extra},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.2,
-            max_tokens=1200,
-        )
-        return response.choices[0].message.content.strip()
-
-    # First attempt
-    raw = _call()
+    if not practices:
+        raise ValueError("Nessuna pratica configurata. Aggiungi almeno una pratica nelle impostazioni.")
     try:
-        result = _parse_json_response(raw)
-    except json.JSONDecodeError:
-        # Retry with stricter instruction
-        raw = _call("\n\nIMPORTANTE: Rispondi SOLO con JSON valido. Nessun testo, nessun markdown.")
-        try:
-            result = _parse_json_response(raw)
-        except json.JSONDecodeError as exc:
-            raise ValueError(
-                f"Risposta AI non parseable dopo retry: {exc}\nRisposta raw: {raw[:500]}"
-            )
+        hours = float(daily_hours)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Ore giornaliere non valide.") from exc
+    if hours <= 0:
+        raise ValueError("Ore giornaliere non valide.")
 
-    # Validate structure
-    if "timesheet" not in result or not isinstance(result.get("timesheet"), list):
-        raise ValueError(f"Struttura risposta AI non valida (manca 'timesheet'): {str(result)[:300]}")
 
-    if not result["timesheet"]:
-        raise ValueError("L'AI ha restituito un timesheet vuoto.")
+def elaborate_timesheet(entries: list[dict], practices: list[dict], user_name: str, date: str,
+                        daily_hours: float, ai_settings: dict | None, model: str, api_key: str) -> dict:
+    """Turn the day's entries into ``{"timesheet","totale_ore","note"}`` via OpenAI.
 
-    # Enforce correct field types + description formatting
-    for item in result["timesheet"]:
-        item["pratica"] = str(item.get("pratica", ""))
-        item["ore"] = float(item.get("ore", 0))
-        desc = str(item.get("descrizione", "")).strip()
-        if desc:
-            desc = desc[0].upper() + desc[1:]          # Capital first letter
-            if not desc.endswith("."):
-                desc = desc + "."                       # Trailing period
-        item["descrizione"] = desc
+    Raises ``ValueError`` for configuration/validation problems (missing key, no
+    entries, unusable AI output after one retry); OpenAI errors are re-raised.
+    """
+    _check_inputs(entries, practices, daily_hours, api_key)
+    from openai import OpenAI
 
-    # Server-side 8h enforcement
-    result["timesheet"] = _balance_to_8h(result["timesheet"])
-    result["totale_ore"] = round(sum(i["ore"] for i in result["timesheet"]), 2)
-    result["note"] = result.get("note", "")
+    client = OpenAI(api_key=api_key.strip())
+    system_prompt, user_prompt = build_prompts(entries, practices, user_name, date, daily_hours, ai_settings)
+    temperature = _temperature(ai_settings)
+    model_name = model.strip() if isinstance(model, str) and model.strip() else config.DEFAULT_MODEL
 
-    return result
+    hours = float(daily_hours)
+    raw = _complete(client, model_name, system_prompt, user_prompt, temperature)
+    result, problem = _parse_and_finalise(raw, practices, hours)
+    if result is not None:
+        return result
+    logger.warning("AI response unusable (%s); retrying once (raw: %r)", problem, (raw or "")[:200])
+    raw = _complete(client, model_name, system_prompt + RETRY_INSTRUCTION, user_prompt, temperature)
+    result, problem = _parse_and_finalise(raw, practices, hours)
+    if result is not None:
+        return result
+    raise ValueError(f"{problem} (anche dopo un nuovo tentativo).")
+
+
+def _parse_and_finalise(raw: str, practices: list[dict], hours: float) -> "tuple[dict | None, str | None]":
+    """Parse + validate one model reply → ``(result, None)`` or ``(None, problem)``."""
+    parsed = _try_parse(raw)
+    if parsed is None:
+        return None, "La risposta dell'AI non è in formato JSON valido"
+    try:
+        return _finalise(parsed, practices, hours), None
+    except ValueError as exc:
+        return None, str(exc).rstrip(".")

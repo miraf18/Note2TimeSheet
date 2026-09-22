@@ -1,16 +1,41 @@
+# Note2TimeSheet v2 - Docker Compose
+#
+# This stack is deliberately named differently from the v1 one so both can run
+# side by side on the same machine:
+#   - v1: service "timesheet"    -> container "timesheet-app"    on port 5599
+#   - v2: service "timesheet-v2" -> container "timesheet-app-v2" on port 5600
+# Nothing here touches the old container; stop it separately when you no longer
+# need it (docker stop timesheet-app).
+#
+# Usage:
+#   copy .env.example .env      (fill at least OPENAI_API_KEY or set it from the UI)
+#   docker compose up -d --build
+#   open http://localhost:5600
+#
+# Persistent data (settings.json, secrets.json, practices.json, daily history,
+# Microsoft token cache) is kept on the host in TIMESHEET_HOST_DATA_DIR (from
+# .env; default ./data), so the image can be rebuilt without losing anything.
 services:
-  timesheet:
+  timesheet-v2:
     build: .
-    image: timesheet-app:latest
-    container_name: timesheet-app
+    image: timesheet-app:v2
+    container_name: timesheet-app-v2
     restart: unless-stopped
     env_file:
       - .env
     environment:
-      APP_PORT: 5599
+      # Values below override whatever is in .env: inside the container the port,
+      # data dir and browser behaviour must be fixed.
+      APP_PORT: 5600
+      APP_HOST: 0.0.0.0
       AUTO_OPEN_BROWSER: "false"
       TIMESHEET_DATA_DIR: /app/data
+      TZ: Europe/Rome
     ports:
-      - "5599:5599"
+      - "5600:5600"
     volumes:
-      - ./data:/app/data
+      # Host folder that receives settings.json, secrets.json, practices.json,
+      # the daily history and the Microsoft token cache. Set
+      # TIMESHEET_HOST_DATA_DIR in .env (e.g. C:/Users/<tu>/Desktop/Note2Timesheet);
+      # when unset it falls back to ./data next to this file.
+      - ${TIMESHEET_HOST_DATA_DIR:-./data}:/app/data
