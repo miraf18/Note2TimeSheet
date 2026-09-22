@@ -60,7 +60,7 @@ class TestPrompts:
 
     def test_placeholders_documented(self):
         names = {p["name"] for p in ai_service.PLACEHOLDERS}
-        assert names == {"practices", "codes", "daily_hours", "daily_minutes", "user_name", "date", "entries"}
+        assert names == {"practices", "codes", "daily_hours", "daily_minutes", "user_name", "date", "weekday", "entries"}
         assert all(p["description"] and p["token"] == "{{" + p["name"] + "}}" for p in ai_service.PLACEHOLDERS)
 
     @pytest.mark.parametrize("value", [None, "", "   "])
@@ -81,13 +81,26 @@ class TestPrompts:
         assert "ESATTAMENTE 7.50 ore (450 minuti)" in system
         assert '"totale_ore": 7.50' in system
         assert system.count("\n\n") >= 2
-        assert user.startswith("Data: 2026-09-16\nUtente: Raffaele\n\nATTIVITÀ DELLA GIORNATA:\n- [09:15] Sviluppo API\n")
+        assert user.startswith("Data: 2026-09-16 (mercoledì)\nUtente: Raffaele\n\nATTIVITÀ DELLA GIORNATA:\n- [09:15] Sviluppo API\n")
         assert user.endswith("Il totale DEVE essere esattamente 7.50 ore.")
 
     def test_custom_sections_and_json_braces_survive(self):
         custom = {"system_output": 'Rispondi {"a": {{daily_hours}}, "b": {{ codes }} } {{unknown}}'}
         system, _ = ai_service.build_prompts([MANUAL], PRACTICES, "U", "2026-01-01", 8, custom)
         assert 'Rispondi {"a": 8.00, "b": 100, 200 } {{unknown}}' in system
+
+    @pytest.mark.parametrize("date_iso, expected", [
+        ("2026-09-16", "mercoledì"), ("2026-09-21", "lunedì"), ("2026-09-27", "domenica"),
+        ("not-a-date", ""), (None, ""), ("", ""),
+    ])
+    def test_weekday_name(self, date_iso, expected):
+        assert ai_service.weekday_name(date_iso) == expected
+
+    def test_rules_classify_meetings_by_topic_not_by_practice_name(self):
+        rules = ai_service.DEFAULT_PROMPTS["system_rules"]
+        assert "solo perché il suo nome contiene" in rules
+        assert "ARGOMENTO" in rules and "giorno della settimana" in rules
+        assert "{{weekday}}" in ai_service.DEFAULT_PROMPTS["user_template"]
 
     def test_fill_placeholders_leaves_unknown_tokens(self):
         assert ai_service.fill_placeholders("{{x}} {{date}}", {"date": "d"}) == "{{x}} d"

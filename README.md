@@ -27,7 +27,7 @@ Durante il giorno scrivi le attivita' in testo libero, anche in modo informale. 
 - Trasforma appunti disordinati in descrizioni professionali in italiano, pronte da copiare in un gestionale.
 - Bilancia il risultato al totale giornaliero configurato, con incrementi di 0,25 h.
 - **Storico giornaliero**: ogni giorno ha il suo file; puoi tornare indietro, rielaborare e correggere.
-- Tabella finale modificabile inline (ore e descrizione) con salvataggio automatico, piu' **Copia JSON**.
+- Tabella finale modificabile inline (pratica, ore e descrizione) con salvataggio automatico, piu' **Copia JSON**.
 - **Impostazioni dall'interfaccia**: nome, ore giornaliere, fuso orario, modello e chiave OpenAI, integrazioni, pratiche e persino il prompt dell'AI, tutto senza riavviare.
 
 ## Come funziona
@@ -156,6 +156,7 @@ Segnaposto disponibili nel prompt:
 | `{{daily_hours}}` / `{{daily_minutes}}` | totale giornaliero, es. `8.00` / `480` |
 | `{{user_name}}` | nome utente |
 | `{{date}}` | giorno in formato `YYYY-MM-DD` |
+| `{{weekday}}` | giorno della settimana in italiano (es. `martedì`) |
 | `{{entries}}` | attivita' della giornata gia' formattate |
 
 ## Guide passo-passo

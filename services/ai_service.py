@@ -8,6 +8,7 @@ substitution so JSON braces inside the templates are safe.
 
 from __future__ import annotations
 
+import datetime
 import json
 import logging
 import re
@@ -46,7 +47,10 @@ DEFAULT_PROMPTS: dict[str, str] = {
         "1. Il totale delle ore DEVE essere ESATTAMENTE {{daily_hours}} ore ({{daily_minutes}} minuti). "
         "Mai di più, mai di meno.\n"
         "2. Ogni voce deve essere classificata con uno dei codici pratica disponibili: {{codes}}\n"
-        "3. Scegli il codice più appropriato in base alla descrizione dell'attività e alle tipologie elencate.\n"
+        "3. Scegli il codice in base al CONTENUTO e allo SCOPO dell'attività, confrontandoli con le descrizioni "
+        "delle pratiche (comprese le indicazioni \"Quando NON usarla\"). Non assegnare mai una pratica solo perché "
+        "il suo nome contiene una parola presente nell'attività (es. \"meeting\", \"riunione\", \"supporto\"): "
+        "il nome da solo non basta, conta la descrizione della pratica.\n"
         "4. Raggruppa le attività simili sotto la stessa pratica: se più attività hanno lo stesso codice, "
         "uniscile in un'unica voce con le ore sommate e una descrizione che le riassuma tutte. "
         "Esempio: \"Sviluppo e test dei moduli di autenticazione OAuth2, Single Sign-On e gestione "
@@ -58,7 +62,12 @@ DEFAULT_PROMPTS: dict[str, str] = {
         "Esempio sbagliato: \"sviluppo autenticazione\"\n"
         "7. Le riunioni (voci contrassegnate con [Riunione]) hanno una durata nota in minuti: usala come "
         "riferimento preciso. La descrizione di ogni riunione DEVE iniziare con \"Riunione:\" "
-        "(esempio: \"Riunione: allineamento settimanale con il team di sviluppo.\").\n"
+        "(esempio: \"Riunione: allineamento settimanale con il team di sviluppo.\"). Classifica ogni riunione "
+        "in base al suo ARGOMENTO (allineamento del team, avanzamento di un progetto, fornitori, formazione, "
+        "raccolta requisiti, supporto...) esattamente come le altre attività. Se la descrizione di una pratica "
+        "pone dei vincoli (giorno della settimana, orario, durata massima, partecipanti), assegnala SOLO se la "
+        "riunione li rispetta tutti: verifica il giorno indicato in \"Data\" e l'orario [inizio–fine] della "
+        "voce; in caso contrario usa la pratica generica più adatta all'argomento.\n"
         "8. Le voci GitHub (commit e pull request) rappresentano lavoro di sviluppo: usa i messaggi di commit "
         "per descrivere cosa è stato fatto, raggruppando per repository o argomento. Non riportare mai "
         "hash, SHA o URL nella descrizione.\n"
@@ -82,7 +91,7 @@ DEFAULT_PROMPTS: dict[str, str] = {
         "}"
     ),
     "user_template": (
-        "Data: {{date}}\n"
+        "Data: {{date}} ({{weekday}})\n"
         "Utente: {{user_name}}\n\n"
         "ATTIVITÀ DELLA GIORNATA:\n"
         "{{entries}}\n\n"
@@ -98,6 +107,7 @@ PLACEHOLDERS: list[dict[str, str]] = [
     {"name": "daily_minutes", "token": "{{daily_minutes}}", "description": "Minuti giornalieri (es. 480)"},
     {"name": "user_name", "token": "{{user_name}}", "description": "Nome dell'utente"},
     {"name": "date", "token": "{{date}}", "description": "Data del giorno elaborato (YYYY-MM-DD)"},
+    {"name": "weekday", "token": "{{weekday}}", "description": "Giorno della settimana in italiano (es. martedì)"},
     {"name": "entries", "token": "{{entries}}", "description": "Attività della giornata già formattate"},
 ]
 
@@ -146,6 +156,17 @@ def render_codes(practices: list[dict]) -> str:
     return ", ".join(str(p.get("code", "")) for p in practices or [] if isinstance(p, dict) and p.get("code"))
 
 
+WEEKDAYS_IT = ("lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato", "domenica")
+
+
+def weekday_name(date_iso: Any) -> str:
+    """Italian weekday for an ISO date (``""`` when the date is not valid)."""
+    try:
+        return WEEKDAYS_IT[datetime.date.fromisoformat(str(date_iso)).weekday()]
+    except (TypeError, ValueError):
+        return ""
+
+
 def placeholder_values(entries: list[dict], practices: list[dict], user_name: str,
                        date: str, daily_hours: float) -> dict[str, str]:
     return {
@@ -155,6 +176,7 @@ def placeholder_values(entries: list[dict], practices: list[dict], user_name: st
         "daily_minutes": str(daily_minutes(daily_hours)),
         "user_name": str(user_name or ""),
         "date": str(date or ""),
+        "weekday": weekday_name(date),
         "entries": render_entries(entries),
     }
 

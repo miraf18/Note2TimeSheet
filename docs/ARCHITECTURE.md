@@ -327,6 +327,7 @@ the templates are safe):
 | `{{daily_minutes}}` | e.g. `480` |
 | `{{user_name}}` | |
 | `{{date}}` | YYYY-MM-DD |
+| `{{weekday}}` | Italian weekday name of `{{date}}` (e.g. `martedì`), empty for invalid dates |
 | `{{entries}}` | rendered entry lines (see below) |
 
 Default sections (keep the spirit and the mandatory rules of the v1 prompt,
@@ -343,7 +344,7 @@ fix typos, add GitHub rule):
   remaining time proportionally; compress non-meeting items if over total.
 - `system_output`: "FORMATO OUTPUT — rispondi ESCLUSIVAMENTE con JSON valido…"
   with the example `{"timesheet":[{"pratica","ore","descrizione"}],"totale_ore","note"}`.
-- `user_template`: `Data: {{date}}\nUtente: {{user_name}}\n\nATTIVITÀ DELLA GIORNATA:\n{{entries}}\n\nElabora il timesheet. Il totale DEVE essere esattamente {{daily_hours}} ore.`
+- `user_template`: `Data: {{date}} ({{weekday}})\nUtente: {{user_name}}\n\nATTIVITÀ DELLA GIORNATA:\n{{entries}}\n\nElabora il timesheet. Il totale DEVE essere esattamente {{daily_hours}} ore.`
 
 Entry rendering (`render_entries(entries) -> str`):
 
@@ -603,7 +604,7 @@ Layout:
   "Ultimo aggiornamento", buttons **Copia JSON** (keep! same payload shape as
   v1: `{data, utente, timesheet:[{pratica, ore, descrizione}], totale_ore}`)
   and **Elabora di nuovo**; table Pratica / Ore / Descrizione with inline
-  edit (ore & descrizione) that now **persists** with `PUT /api/elaborate`
+  edit (pratica via a select, ore & descrizione) that now **persists** with `PUT /api/elaborate`
   (debounced, toast on error); total coloured green when equal to
   `daily_hours`, red otherwise; note row.
 - **Settings modal** with tabs (`settings.js`, `integrations.js`):

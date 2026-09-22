@@ -2,12 +2,13 @@
  * Timesheet table rows + inline cell editing (docs/FRONTEND_CONTRACT.md §7.3).
  *
  * Pure DOM: no store or API access. timesheet.js supplies the handlers:
- *   handlers.onEdit(index, field, value)  field ∈ 'ore' | 'descrizione'
+ *   handlers.onEdit(index, field, value)  field ∈ 'pratica' | 'ore' | 'descrizione'
  *   handlers.onEditEnd()                  called when an inline input closes
  *
  * Row markup:
- * <tr data-index="i"><td><div class="practice-badge"><span class="practice-code [unknown]">…</span>
- * <span class="practice-name-label">…</span></div></td><td class="editable">ore</td>
+ * <tr data-index="i"><td class="editable practice-td"><div class="practice-badge">
+ * <span class="practice-code [unknown]">…</span><span class="practice-name-label">…</span></div></td>
+ * (click → <select class="inline-select"> with every practice)<td class="editable">ore</td>
  * <td class="desc-td"><div class="desc-cell"><span class="desc-text">…</span>
  * <button class="desc-edit-btn">✎</button></div></td></tr>
  */
@@ -42,7 +43,7 @@ function runInlineEdit(host, input, parse, restore, onCommit, onEnd) {
   clear(host);
   host.appendChild(input);
   input.focus();
-  input.select();
+  if (typeof input.select === 'function') input.select();
   let done = false;
   const finish = (commit) => {
     if (done) return;
@@ -91,9 +92,32 @@ export function startDescEdit(descText, row, index, handlers) {
     (value) => handlers.onEdit(index, 'descrizione', value), handlers.onEditEnd);
 }
 
+/** Inline edit of the practice: a <select> listing every practice (plus the current code if unknown). */
+export function startPracticeEdit(td, row, index, practices, handlers) {
+  if (td.querySelector('select')) return;
+  const current = String(row.pratica == null ? '' : row.pratica);
+  const list = (Array.isArray(practices) ? practices : []).filter((p) => p && p.code != null);
+  const options = list.map((p) => el('option', { value: String(p.code), text: String(p.code) + ' — ' + String(p.name || '') }));
+  if (current && !list.some((p) => String(p.code) === current)) {
+    options.unshift(el('option', { value: current, text: current + ' — codice attuale (non in elenco)' }));
+  }
+  const select = el('select', { class: 'inline-select', 'aria-label': 'Pratica' }, options);
+  select.value = current;
+  const parse = (raw) => {
+    const value = String(raw == null ? '' : raw);
+    return value && value !== current ? value : null;
+  };
+  const restore = (value) => {
+    clear(td);
+    td.appendChild(buildPracticeBadge(value === undefined ? row : Object.assign({}, row, { pratica: value }), practices));
+  };
+  runInlineEdit(td, select, parse, restore, (value) => handlers.onEdit(index, 'pratica', value), handlers.onEditEnd);
+  select.addEventListener('change', () => select.blur()); // a mouse pick commits immediately
+}
+
 /* ── Cells ─────────────────────────────────────────────────────── */
 
-function practiceCell(row, practices) {
+function buildPracticeBadge(row, practices) {
   const practice = findPractice(practices, row.pratica);
   const code = el('span', {
     class: 'practice-code' + (practice ? '' : ' unknown'),
@@ -101,7 +125,13 @@ function practiceCell(row, practices) {
     title: practice ? (practice.description || practice.name || '') : 'Codice non presente nell\'elenco pratiche',
   });
   const name = el('span', { class: 'practice-name-label', text: practice ? practice.name || '' : '' });
-  return el('td', null, el('div', { class: 'practice-badge' }, code, name));
+  return el('div', { class: 'practice-badge' }, code, name);
+}
+
+function practiceCell(row, index, practices, handlers) {
+  const td = el('td', { class: 'editable practice-td', title: 'Clicca per cambiare pratica' }, buildPracticeBadge(row, practices));
+  td.addEventListener('click', () => startPracticeEdit(td, row, index, practices, handlers));
+  return td;
 }
 
 function hoursCell(row, index, handlers) {
@@ -147,7 +177,7 @@ export function renderRows(tbody, timesheet, practices, handlers, savingRows) {
   const fragment = document.createDocumentFragment();
   (Array.isArray(timesheet) ? timesheet : []).forEach((row, index) => {
     const tr = el('tr', { class: saving.includes(index) ? 'saving' : null, dataset: { index: String(index) } },
-      practiceCell(row || {}, practices),
+      practiceCell(row || {}, index, practices, handlers),
       hoursCell(row || {}, index, handlers),
       descCell(row || {}, index, handlers));
     fragment.appendChild(tr);
