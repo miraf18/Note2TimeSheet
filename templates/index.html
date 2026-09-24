@@ -345,6 +345,11 @@
               <div class="repo-list" id="ghRepoList" role="group" aria-label="Repository disponibili">
                 <p class="repo-empty" id="ghRepoEmpty">Connetti GitHub per vedere i tuoi repository. Nessuna selezione = tutti i repository con attività.</p>
               </div>
+              <div class="form-field">
+                <label for="ghAuthorEmails">Email usate nei commit (opzionale)</label>
+                <input type="text" id="ghAuthorEmails" placeholder="nome@azienda.it, altro@esempio.it" autocomplete="off">
+                <p class="form-help">Vengono importati i commit collegati al tuo account GitHub. Se in git usi un'email non registrata su GitHub, aggiungila qui (separa più email con la virgola).</p>
+              </div>
               <div class="toggle-row">
                 <label class="toggle"><input type="checkbox" id="ghIncCommits" checked> Commit</label>
                 <label class="toggle"><input type="checkbox" id="ghIncPRs" checked> Pull request</label>

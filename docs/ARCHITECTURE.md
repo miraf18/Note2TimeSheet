@@ -200,7 +200,8 @@ Environment variables (all optional except OpenAI key):
     "repos": [],
     "include_commits": true,
     "include_pull_requests": true,
-    "include_issues": false
+    "include_issues": false,
+    "author_emails": []
   },
   "microsoft": {
     "client_id": "",
@@ -408,16 +409,22 @@ Activity fetch for a day (`fetch_activity(date_iso, repos, login)`):
    (max 300 events; API only returns events for the last 90 days). Stop paging
    when the last event's `created_at` < start. Keep events with
    `start <= created_at < end` and (if `repos` non-empty) `repo.name in repos`.
-   - `PushEvent` → `payload.commits[]` (`sha`, `message`, `url`) → commits
-     (dedupe by sha). Convert API commit url to `https://github.com/{repo}/commit/{sha}`.
+   - `PushEvent`s are only used to discover which repositories had activity
+     (when `repos` is empty): GitHub no longer includes the commit list in
+     event payloads, so commits are never taken from events.
    - `PullRequestEvent` → action `opened` / `reopened` / `closed` (→ `merged`
      if `payload.pull_request.merged` else `closed`) with `number`, `title`, `html_url`.
    - `PullRequestReviewEvent` → action `reviewed`.
    - `IssuesEvent` (opened/closed) and `IssueCommentEvent` (`commented`) → issues.
-3. **Default-branch commits** for each monitored repo (cap 25 repos):
-   `GET /repos/{owner}/{name}/commits?author={login}&since={start}Z&until={end}Z&per_page=100`
-   → merge into commits by sha (`commit.message`, `html_url`). 404/409 (empty
-   repo) → skip silently; 401 → `AUTH_REQUIRED`; 403 with `X-RateLimit-Remaining: 0`
+3. **Branch scan** for each monitored repo (cap 25 repos), requests run on a
+   small thread pool: `GET /repos/{owner}/{name}/branches?per_page=100` (first
+   60 branches, deduped by head sha), then for every branch
+   `GET /repos/{owner}/{name}/commits?sha={branch}&since={start}Z&until={end}Z&per_page=100`
+   (no `author` filter). Keep a commit when it is not a merge (`parents` ≤ 1)
+   and `author.login == login` **or** `commit.author.email` is in
+   `github.author_emails` (for git identities not linked to the GitHub
+   account). Dedupe by sha across branches. 404/409 (missing/empty repo) →
+   skip silently; 401 → `AUTH_REQUIRED`; 403 with `X-RateLimit-Remaining: 0`
    → error "Limite API GitHub raggiunto, riprova più tardi".
 4. Return `{"commits": [{"sha","repo","message","url","date"}], "pull_requests": [{"repo","number","title","action","url","date"}], "issues": [...]}` sorted by date.
 

@@ -236,10 +236,16 @@ def comment_event(repo, created_at, number, title, on_pr=False):
     return _event("IssueCommentEvent", repo, created_at, {"action": "created", "issue": issue, "comment": {}})
 
 
-def api_commit(repo, sha, message, date):
-    return {"sha": sha, "html_url": f"https://github.com/{repo}/commit/{sha}", "author": {"login": LOGIN},
-            "commit": {"message": message, "author": {"date": date, "name": "Raffaele"},
+def api_commit(repo, sha, message, date, author_login=LOGIN, email="r@example.com", parents=1):
+    return {"sha": sha, "html_url": f"https://github.com/{repo}/commit/{sha}",
+            "author": {"login": author_login} if author_login else None,
+            "parents": [{"sha": f"{n:040x}"} for n in range(parents)],
+            "commit": {"message": message, "author": {"date": date, "name": "Raffaele", "email": email},
                        "committer": {"date": date}}}
+
+
+def api_branch(name, head):
+    return {"name": name, "commit": {"sha": head}}
 
 
 def day_events():
@@ -260,11 +266,15 @@ def day_events():
 
 def wire_activity(http, events=None, repo_commits=None):
     http.add("GET", f"/users/{LOGIN}/events", FakeResponse(200, events if events is not None else day_events()))
+    http.add("GET", f"/repos/{REPO}/branches", FakeResponse(200, [
+        api_branch("main", "1" * 40), api_branch("feature", "2" * 40)]))
     http.add("GET", f"/repos/{REPO}/commits", FakeResponse(200, repo_commits if repo_commits is not None else [
         api_commit(REPO, "a" * 40, "feat: events", f"{DAY}T10:00:00Z"),
         api_commit(REPO, "f" * 40, "chore: bump version", f"{DAY}T08:00:00Z"),
     ]))
-    http.add("GET", f"/repos/{OTHER_REPO}/commits", FakeResponse(200, []))
+    http.add("GET", f"/repos/{OTHER_REPO}/branches", FakeResponse(200, [api_branch("main", "3" * 40)]))
+    http.add("GET", f"/repos/{OTHER_REPO}/commits", FakeResponse(200, [
+        api_commit(OTHER_REPO, "d" * 40, "docs: readme", f"{DAY}T09:00:00Z")]))
     return http
 
 
@@ -502,14 +512,15 @@ def test_list_repos_upstream_error(connected, http):
 # Activity
 # ---------------------------------------------------------------------------
 
-def test_fetch_activity_maps_events_and_merges_default_branch_commits(connected, http):
+def test_fetch_activity_maps_events_and_scans_every_branch(connected, http):
     wire_activity(http)
     activity, error = gh.fetch_activity(DAY, [REPO])
     assert error is None
 
     commits = activity["commits"]
-    assert [c["sha"][0] for c in commits] == ["f", "a", "b"]  # sorted by date, deduped by sha
-    assert commits[1] == {"sha": "a" * 40, "repo": REPO, "message": "feat: events\n\nbody",
+    # Both branches return the same two commits: deduped by sha, sorted by date.
+    assert [c["sha"][0] for c in commits] == ["f", "a"]
+    assert commits[1] == {"sha": "a" * 40, "repo": REPO, "message": "feat: events",
                           "url": f"https://github.com/{REPO}/commit/{'a' * 40}", "date": f"{DAY}T10:00:00Z"}
     assert commits[0]["message"] == "chore: bump version" and commits[0]["date"] == f"{DAY}T08:00:00Z"
 
@@ -522,10 +533,12 @@ def test_fetch_activity_maps_events_and_merges_default_branch_commits(connected,
 
     events_call = next(c for c in http.calls if "/events" in c["url"])
     assert events_call["params"] == {"per_page": 100, "page": 1}
-    commits_call = next(c for c in http.calls if "/commits" in c["url"])
-    assert commits_call["params"] == {"author": LOGIN, "since": f"{DAY}T00:00:00Z",
-                                      "until": "2026-09-17T00:00:00Z", "per_page": 100}
-    assert http.count(f"/repos/{OTHER_REPO}/commits") == 0
+    branch_params = {c["params"]["sha"]: c["params"] for c in http.calls if c["url"].endswith("/commits")}
+    assert set(branch_params) == {"main", "feature"}  # one commits request per branch, no author filter
+    assert branch_params["feature"] == {"sha": "feature", "since": f"{DAY}T00:00:00Z",
+                                        "until": "2026-09-17T00:00:00Z", "per_page": 100}
+    assert http.count(f"/repos/{REPO}/branches") == 1
+    assert http.count(f"/repos/{OTHER_REPO}/commits") == 0  # not monitored → not scanned
 
 
 def test_fetch_activity_empty_repos_means_all_repos(connected, http):
@@ -533,8 +546,8 @@ def test_fetch_activity_empty_repos_means_all_repos(connected, http):
     activity, error = gh.fetch_activity(DAY, [])
     assert error is None
     assert {c["repo"] for c in activity["commits"]} == {REPO, OTHER_REPO}
-    assert http.count(f"/repos/{REPO}/commits") == 1
-    assert http.count(f"/repos/{OTHER_REPO}/commits") == 1
+    assert http.count(f"/repos/{REPO}/branches") == 1 and http.count(f"/repos/{REPO}/commits") == 2
+    assert http.count(f"/repos/{OTHER_REPO}/branches") == 1 and http.count(f"/repos/{OTHER_REPO}/commits") == 1
 
 
 def test_fetch_activity_pr_closed_without_merge(connected, http):
@@ -552,15 +565,15 @@ def _full_page(created_at):
 def test_fetch_activity_stops_paging_when_older_than_day(connected, http):
     pages = {1: _full_page(f"{DAY}T12:00:00Z"), 2: _full_page("2026-09-10T12:00:00Z"), 3: []}
     http.add("GET", "/events", lambda call: FakeResponse(200, pages[call["params"]["page"]]))
-    http.add("GET", "/commits", FakeResponse(200, []))
+    http.add("GET", "/branches", FakeResponse(200, []))
     activity, error = gh.fetch_activity(DAY, [REPO])
-    assert error is None and len(activity["commits"]) == 100
+    assert error is None and activity["commits"] == []  # PushEvents never contribute commits
     assert http.count("/events") == 2
 
 
 def test_fetch_activity_reads_at_most_three_pages(connected, http):
     http.add("GET", "/events", lambda call: FakeResponse(200, _full_page(f"{DAY}T12:00:00Z")))
-    http.add("GET", "/commits", FakeResponse(200, []))
+    http.add("GET", "/branches", FakeResponse(200, []))
     activity, error = gh.fetch_activity(DAY, [REPO])
     assert error is None and http.count("/events") == 3
 
@@ -586,8 +599,8 @@ def test_fetch_activity_forbidden_without_rate_limit_is_generic(connected, http)
 
 def test_fetch_activity_skips_missing_or_empty_repos(connected, http):
     http.add("GET", "/events", FakeResponse(200, []))
-    http.add("GET", "/repos/bureau/gone/commits", FakeResponse(404, {"message": "Not Found"}))
-    http.add("GET", "/repos/bureau/empty/commits", FakeResponse(409, {"message": "Git Repository is empty."}))
+    http.add("GET", "/repos/bureau/gone/branches", FakeResponse(404, {"message": "Not Found"}))
+    http.add("GET", "/repos/bureau/empty/branches", FakeResponse(409, {"message": "Git Repository is empty."}))
     activity, error = gh.fetch_activity(DAY, ["bureau/gone", "bureau/empty"])
     assert error is None
     assert activity == {"commits": [], "pull_requests": [], "issues": []}
@@ -683,20 +696,20 @@ def test_import_day_creates_entries_and_marks_sources(connected, http):
     wire_activity(http)
     report = gh.import_day(DAY)
 
-    assert report == {"new": 4, "skipped": 0, "summary": {"commits": 3, "pull_requests": 3, "issues": 0}}
+    assert report == {"new": 4, "skipped": 0, "summary": {"commits": 2, "pull_requests": 3, "issues": 0}}
     entries = connected.state.get_entries(DAY)
     assert [e["type"] for e in entries] == ["github"] * 4
     commits_entry = entries[0]
     assert commits_entry["meta"]["kind"] == "commits" and commits_entry["meta"]["repo"] == REPO
-    assert [c["sha"][0] for c in commits_entry["meta"]["commits"]] == ["f", "a", "b"]
-    assert commits_entry["text"].startswith(f"{REPO} · 3 commit\n• chore: bump version\n• feat: events")
+    assert [c["sha"][0] for c in commits_entry["meta"]["commits"]] == ["f", "a"]
+    assert commits_entry["text"].startswith(f"{REPO} · 2 commit\n• chore: bump version\n• feat: events")
     assert commits_entry["source_id"] is None
     pr_entry = entries[-1]
     assert pr_entry["text"] == f"{REPO} · Pull request #12 unita: Add GitHub import"
     assert pr_entry["source_id"] == f"github:pr:{REPO}#12:merged"
     imported = connected.state.days[DAY]["imported"]
     assert f"github:commit:{'a' * 40}" in imported and f"github:pr:{REPO}#13:reviewed" in imported
-    assert f"github:commit:{'c' * 40}" not in imported  # non-distinct commit ignored
+    assert f"github:commit:{'b' * 40}" not in imported  # PushEvent commits are never imported
 
 
 def test_import_day_merges_new_commits_into_existing_entry_and_dedupes(connected, http):
@@ -711,13 +724,13 @@ def test_import_day_merges_new_commits_into_existing_entry_and_dedupes(connected
     report = gh.import_day(DAY)
 
     assert report["new"] == 3 and report["skipped"] == 1
-    assert report["summary"] == {"commits": 2, "pull_requests": 2, "issues": 0}
+    assert report["summary"] == {"commits": 1, "pull_requests": 2, "issues": 0}
     entries = connected.state.get_entries(DAY)
     commits_entries = [e for e in entries if e["meta"].get("kind") == "commits"]
     assert len(commits_entries) == 1
     merged = commits_entries[0]
-    assert [c["sha"][0] for c in merged["meta"]["commits"]] == ["a", "f", "b"]
-    assert merged["text"] == f"{REPO} · 3 commit\n• feat: events\n• chore: bump version\n• fix: typo"
+    assert [c["sha"][0] for c in merged["meta"]["commits"]] == ["a", "f"]
+    assert merged["text"] == f"{REPO} · 2 commit\n• feat: events\n• chore: bump version"
     assert sum(1 for e in entries if e["source_id"] == f"github:pr:{REPO}#12:merged") == 0
 
     again = gh.import_day(DAY)
@@ -731,8 +744,8 @@ def test_import_day_recreates_entry_only_with_new_commits_after_deletion(connect
     wire_activity(http)
     gh.import_day(DAY)
     commits_entry = next(e for e in connected.state.get_entries(DAY) if e["meta"].get("kind") == "commits")
-    assert [c["sha"][0] for c in commits_entry["meta"]["commits"]] == ["f", "b"]
-    assert commits_entry["text"].startswith(f"{REPO} · 2 commit")
+    assert [c["sha"][0] for c in commits_entry["meta"]["commits"]] == ["f"]
+    assert commits_entry["text"].startswith(f"{REPO} · 1 commit")
 
 
 def test_import_day_respects_include_flags(connected, http):
@@ -789,3 +802,61 @@ def test_token_arriving_after_disconnect_is_discarded(env, http, sync_thread):
     assert gh.is_connected() is False
     assert http.count("/user") == 0
     assert gh.auth_status()["pending"] is False
+
+
+# ---------------------------------------------------------------------------
+# Branch scanning
+# ---------------------------------------------------------------------------
+
+def test_branch_scan_finds_commits_only_on_feature_branches(connected, http):
+    """Commits pushed to a branch not yet merged into main are imported."""
+    http.add("GET", "/events", FakeResponse(200, []))
+    http.add("GET", f"/repos/{REPO}/branches", FakeResponse(200, [
+        api_branch("main", "1" * 40), api_branch("backoffice", "2" * 40)]))
+    by_branch = {
+        "main": [],
+        "backoffice": [api_commit(REPO, "a" * 40, "feat: antiriciclaggio", f"{DAY}T08:35:00Z"),
+                       api_commit(REPO, "b" * 40, "fix: conflitti", f"{DAY}T07:57:00Z")],
+    }
+    http.add("GET", f"/repos/{REPO}/commits", lambda call: FakeResponse(200, by_branch[call["params"]["sha"]]))
+    activity, error = gh.fetch_activity(DAY, [REPO])
+    assert error is None
+    assert [c["message"] for c in activity["commits"]] == ["fix: conflitti", "feat: antiriciclaggio"]
+
+
+def test_branch_scan_keeps_only_own_non_merge_commits(connected, http):
+    connected.settings.settings["github"]["author_emails"] = ["Raffaele.Mirabelli@bureauplattner.com"]
+    http.add("GET", "/events", FakeResponse(200, []))
+    http.add("GET", f"/repos/{REPO}/branches", FakeResponse(200, [api_branch("main", "1" * 40)]))
+    http.add("GET", f"/repos/{REPO}/commits", FakeResponse(200, [
+        api_commit(REPO, "a" * 40, "mine (linked login)", f"{DAY}T10:00:00Z"),
+        api_commit(REPO, "b" * 40, "Merge branch 'main'", f"{DAY}T09:30:00Z", parents=2),
+        api_commit(REPO, "c" * 40, "colleague", f"{DAY}T09:00:00Z", author_login="GianM86", email="g@x.it"),
+        api_commit(REPO, "d" * 40, "mine (unlinked, corporate e-mail)", f"{DAY}T08:00:00Z",
+                   author_login=None, email="raffaele.mirabelli@bureauplattner.com"),
+        api_commit(REPO, "e" * 40, "unlinked, unknown e-mail", f"{DAY}T07:00:00Z",
+                   author_login=None, email="someone@else.it"),
+    ]))
+    activity, error = gh.fetch_activity(DAY, [REPO])
+    assert error is None
+    assert [c["sha"][0] for c in activity["commits"]] == ["d", "a"]
+
+
+def test_branch_scan_dedupes_branches_with_same_head(connected, http):
+    http.add("GET", "/events", FakeResponse(200, []))
+    http.add("GET", f"/repos/{REPO}/branches", FakeResponse(200, [
+        api_branch("main", "1" * 40), api_branch("release", "1" * 40), api_branch("dev", "2" * 40)]))
+    http.add("GET", f"/repos/{REPO}/commits", FakeResponse(200, []))
+    activity, error = gh.fetch_activity(DAY, [REPO])
+    assert error is None and activity["commits"] == []
+    assert sorted(c["params"]["sha"] for c in http.calls if c["url"].endswith("/commits")) == ["dev", "main"]
+
+
+def test_branch_scan_caps_the_number_of_branches(connected, http):
+    http.add("GET", "/events", FakeResponse(200, []))
+    http.add("GET", f"/repos/{REPO}/branches", FakeResponse(200, [
+        api_branch(f"b{i}", f"{i:040x}") for i in range(gh.MAX_BRANCHES_PER_REPO + 15)]))
+    http.add("GET", f"/repos/{REPO}/commits", FakeResponse(200, []))
+    activity, error = gh.fetch_activity(DAY, [REPO])
+    assert error is None
+    assert http.count(f"/repos/{REPO}/commits") == gh.MAX_BRANCHES_PER_REPO

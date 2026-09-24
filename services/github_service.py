@@ -14,6 +14,7 @@ import logging
 import os
 import re
 import threading
+from concurrent.futures import ThreadPoolExecutor
 import time
 from datetime import datetime, timezone
 
@@ -47,6 +48,9 @@ REPOS_AFFILIATION = "owner,collaborator,organization_member"
 REPO_FIELDS = ("full_name", "private", "pushed_at", "default_branch", "description")
 USER_FIELDS = ("login", "name", "avatar_url", "html_url")
 COMMIT_REPOS_CAP = 25
+BRANCHES_PER_PAGE = 100
+MAX_BRANCHES_PER_REPO = 60
+BRANCH_WORKERS = 6
 REPO_CACHE_TTL_SECONDS = 600
 MAX_COMMIT_LINES = 30
 MAX_MESSAGE_CHARS = 120
@@ -463,7 +467,7 @@ def list_repos(force=False):
     return repos, None
 
 
-# --- Activity: user events + default-branch commits
+# --- Activity: user events (pull requests / issues) + branch scan (commits)
 
 def _parse_utc(value):
     """ISO-8601 string (optionally 'Z'-suffixed) → aware UTC datetime, or None."""
@@ -526,16 +530,6 @@ def _fetch_events(session, login, start, end, monitored):
     return [event for event in collected if _event_in_scope(event, start, end, monitored_lower)]
 
 
-def _commits_from_push(event):
-    """Commits of a PushEvent; non-distinct ones (already pushed earlier) are skipped."""
-    repo = _event_repo(event)
-    raw = (event.get("payload") or {}).get("commits") or []
-    return [{
-        "sha": c["sha"], "repo": repo, "message": (c.get("message") or "").strip(),
-        "url": f"https://github.com/{repo}/commit/{c['sha']}", "date": event.get("created_at"),
-    } for c in raw if isinstance(c, dict) and c.get("sha") and c.get("distinct") is not False]
-
-
 def _pr_action(payload):
     action = payload.get("action")
     if action in ("opened", "reopened"):
@@ -582,9 +576,9 @@ def _activity_from_events(events):
     def item_key(item):
         return item["repo"].lower(), item["number"], item["action"]
 
+    # Commits are NOT taken from PushEvents: GitHub no longer includes the commit
+    # list in event payloads, so they are read from the branches instead.
     return {
-        "commits": _dedupe([c for e in events if e.get("type") == "PushEvent" for c in _commits_from_push(e)],
-                           lambda c: c["sha"]),
         "pull_requests": _dedupe([i for e in events for i in _pull_requests_from_event(e)], item_key),
         "issues": _dedupe([i for e in events for i in _issues_from_event(e)], item_key),
     }
@@ -599,17 +593,78 @@ def _commit_from_api(repo, item):
     }
 
 
-def _fetch_repo_commits(session, repo, login, start_iso, end_iso):
-    """Default-branch commits authored by `login` on the day; [] on 404/409 (missing/empty repo)."""
-    params = {"author": login, "since": _utc_z(start_iso), "until": _utc_z(end_iso), "per_page": 100}
-    resp = _request(session, "GET", f"{GITHUB_API}/repos/{repo}/commits", params=params)
+def _fetch_branches(session, repo):
+    """Branches of `repo` as (name, head sha); [] on 404/409 (missing or empty repo)."""
+    resp = _request(session, "GET", f"{GITHUB_API}/repos/{repo}/branches", params={"per_page": BRANCHES_PER_PAGE})
     if resp.status_code in (404, 409):
-        logger.info("Skipping commits of %s (HTTP %s)", repo, resp.status_code)
+        logger.info("Skipping branches of %s (HTTP %s)", repo, resp.status_code)
         return []
     _raise_for_api_error(resp)
     data = _json(resp)
-    return [_commit_from_api(repo, item) for item in (data if isinstance(data, list) else [])
-            if isinstance(item, dict) and item.get("sha")]
+    branches = [(b["name"], ((b.get("commit") or {}).get("sha") or ""))
+                for b in (data if isinstance(data, list) else []) if isinstance(b, dict) and b.get("name")]
+    if len(branches) > MAX_BRANCHES_PER_REPO:
+        logger.warning("%s has %d branches: scanning only the first %d", repo, len(branches), MAX_BRANCHES_PER_REPO)
+    return branches[:MAX_BRANCHES_PER_REPO]
+
+
+def _distinct_heads(branches):
+    """Drop branches whose head commit was already seen (identical history → one scan is enough)."""
+    seen, kept = set(), []
+    for name, head in branches:
+        if head and head in seen:
+            continue
+        seen.add(head)
+        kept.append((name, head))
+    return kept
+
+
+def _fetch_branch_commits(session, repo, branch, start_iso, end_iso):
+    """Raw API commits of `branch` inside the day window (any author); [] on 404/409."""
+    params = {"sha": branch, "since": _utc_z(start_iso), "until": _utc_z(end_iso), "per_page": 100}
+    resp = _request(session, "GET", f"{GITHUB_API}/repos/{repo}/commits", params=params)
+    if resp.status_code in (404, 409):
+        logger.info("Skipping commits of %s@%s (HTTP %s)", repo, branch, resp.status_code)
+        return []
+    _raise_for_api_error(resp)
+    data = _json(resp)
+    return [item for item in (data if isinstance(data, list) else []) if isinstance(item, dict) and item.get("sha")]
+
+
+def _is_merge(item):
+    return len(item.get("parents") or []) > 1
+
+
+def _is_own_commit(item, login, emails):
+    """Authored by the connected user: linked GitHub login, or git e-mail listed in settings."""
+    author_login = ((item.get("author") or {}).get("login") or "").lower()
+    if login and author_login == login.lower():
+        return True
+    email = (((item.get("commit") or {}).get("author") or {}).get("email") or "").strip().lower()
+    return bool(email) and email in emails
+
+
+def _author_emails():
+    value = settings_service.get("github.author_emails", []) or []
+    return {e.strip().lower() for e in value if isinstance(e, str) and e.strip()}
+
+
+def _fetch_own_commits(token, repos, login, emails, start_iso, end_iso):
+    """Own, non-merge commits on EVERY branch of `repos` (branch requests run in parallel)."""
+    def branches_of(repo):
+        return [(repo, name) for name, _head in _distinct_heads(_fetch_branches(_session(token), repo))]
+
+    def commits_of(target):
+        repo, branch = target
+        return [_commit_from_api(repo, item)
+                for item in _fetch_branch_commits(_session(token), repo, branch, start_iso, end_iso)
+                if not _is_merge(item) and _is_own_commit(item, login, emails)]
+
+    if not repos:
+        return []
+    with ThreadPoolExecutor(max_workers=BRANCH_WORKERS, thread_name_prefix="github-scan") as pool:
+        targets = [t for group in pool.map(branches_of, repos) for t in group]
+        return [c for group in pool.map(commits_of, targets) for c in group]
 
 
 def _fetch_activity_or_raise(date_iso, repos, login=None):
@@ -628,12 +683,14 @@ def _fetch_activity_or_raise(date_iso, repos, login=None):
     session = _session(record["access_token"])
     events = _fetch_events(session, login, start, end, monitored)
     activity = _activity_from_events(events)
-    # Empty `repos` = every repository with activity that day.
-    target_repos = monitored or list(dict.fromkeys(_event_repo(e) for e in events))
-    fetched = [c for repo in target_repos[:COMMIT_REPOS_CAP]
-               for c in _fetch_repo_commits(session, repo, login, start_iso, end_iso)]
+    # Empty `repos` = every repository with activity (events) that day.
+    target_repos = list(dict.fromkeys(monitored or [_event_repo(e) for e in events if _event_repo(e)]))
+    if len(target_repos) > COMMIT_REPOS_CAP:
+        logger.warning("Scanning only %d of %d repositories", COMMIT_REPOS_CAP, len(target_repos))
+    commits = _fetch_own_commits(record["access_token"], target_repos[:COMMIT_REPOS_CAP], login,
+                                 _author_emails(), start_iso, end_iso)
     return {
-        "commits": _sorted_by_date(_dedupe(activity["commits"] + fetched, lambda c: c["sha"])),
+        "commits": _sorted_by_date(_dedupe(commits, lambda c: c["sha"])),
         "pull_requests": _sorted_by_date(activity["pull_requests"]),
         "issues": _sorted_by_date(activity["issues"]),
     }

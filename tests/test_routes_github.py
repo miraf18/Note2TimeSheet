@@ -96,8 +96,10 @@ def _wire_day(http):
     events = [_pr_event(REPO, f"{DAY}T10:30:00Z", 12, "Add GitHub import"),
               _push_event(REPO, f"{DAY}T10:00:00Z", "a" * 40, "feat: events mapping")]
     http.add("GET", f"/users/{LOGIN}/events", FakeResponse(200, events))
+    http.add("GET", f"/repos/{REPO}/branches", FakeResponse(200, [{"name": "main", "commit": {"sha": "1" * 40}}]))
     http.add("GET", f"/repos/{REPO}/commits", FakeResponse(200, [
-        {"sha": "b" * 40, "html_url": f"https://github.com/{REPO}/commit/{'b' * 40}",
+        {"sha": "b" * 40, "html_url": f"https://github.com/{REPO}/commit/{'b' * 40}", "author": {"login": LOGIN},
+         "parents": [{"sha": "0" * 40}],
          "commit": {"message": "chore: bump", "author": {"date": f"{DAY}T09:00:00Z"}}}]))
 
 
@@ -258,12 +260,12 @@ def test_import_creates_entries_and_returns_day(client, connected):
     assert resp.status_code == 200
     body = resp.get_json()
     assert body["success"] is True and body["new"] == 2 and body["skipped"] == 0
-    assert body["summary"] == {"commits": 2, "pull_requests": 1, "issues": 0}
+    assert body["summary"] == {"commits": 1, "pull_requests": 1, "issues": 0}
     kinds = sorted(e["meta"]["kind"] for e in body["entries"])
     assert kinds == ["commits", "pull_request"]
     commits_entry = next(e for e in body["entries"] if e["meta"]["kind"] == "commits")
     assert commits_entry["type"] == "github" and commits_entry["meta"]["repo"] == REPO
-    assert commits_entry["text"] == f"{REPO} · 2 commit\n• chore: bump\n• feat: events mapping"
+    assert commits_entry["text"] == f"{REPO} · 1 commit\n• chore: bump"
     pr_entry = next(e for e in body["entries"] if e["meta"]["kind"] == "pull_request")
     assert pr_entry["text"] == f"{REPO} · Pull request #12 aperta: Add GitHub import"
     assert pr_entry["source_id"] == f"github:pr:{REPO}#12:opened"

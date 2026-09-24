@@ -21,7 +21,7 @@ Durante il giorno scrivi le attivita' in testo libero, anche in modo informale. 
 ## Cosa fa
 
 - Registra attivita' giornaliere in testo libero, senza obbligarti a compilare subito un timesheet formale.
-- **GitHub**: collega il tuo account (OAuth *Device Flow* o Personal Access Token), scegli i repository da monitorare e importa con un clic i commit, le pull request (e opzionalmente le issue) del giorno.
+- **GitHub**: collega il tuo account (OAuth *Device Flow* o Personal Access Token), scegli i repository da monitorare e importa con un clic i commit del giorno (su **tutti i branch**, merge esclusi), le pull request (e opzionalmente le issue).
 - **Microsoft 365**: collega il tuo account (device code flow, permesso delegato `Calendars.Read`) e importa le riunioni del giorno con durata e orario. Su Windows nativo resta disponibile il fallback su Outlook desktop (COM).
 - Classifica automaticamente le attivita' in base ai codici pratica che definisci tu, con descrizioni che aiutano l'AI a scegliere.
 - Trasforma appunti disordinati in descrizioni professionali in italiano, pronte da copiare in un gestionale.
@@ -142,7 +142,7 @@ Tutte facoltative. Servono come valore iniziale al primo avvio: quello che salvi
 
 - **Generale**: nome utente, ore giornaliere (il totale a cui l'AI bilancia il timesheet), fuso orario, giorni di storico, modello OpenAI, chiave OpenAI (campo in sola scrittura: l'app mostra solo se e' configurata e da dove, impostazioni o `.env`), tema chiaro/scuro.
 - **Integrazioni**:
-  - *GitHub*: stato della connessione (avatar, login, metodo), **Connetti con GitHub** (device flow: l'app mostra un codice da inserire su github.com), oppure **usa un token personale**; **Disconnetti**; campo *Client ID*; selettore dei repository da monitorare (ricerca, spunta, **Aggiorna elenco**, **Salva repository**; nessun repository selezionato = tutti quelli in cui hai attivita'); interruttori per commit / pull request / issue.
+  - *GitHub*: stato della connessione (avatar, login, metodo), **Connetti con GitHub** (device flow: l'app mostra un codice da inserire su github.com), oppure **usa un token personale**; **Disconnetti**; campo *Client ID*; selettore dei repository da monitorare (ricerca, spunta, **Aggiorna elenco**, **Salva repository**; nessun repository selezionato = tutti quelli in cui hai attivita'); interruttori per commit / pull request / issue; campo *Email usate nei commit* per i commit fatti con un'email git non registrata su GitHub.
   - *Microsoft*: stato (account collegato), **Connetti account Microsoft** (device code), **Disconnetti**; campi *Client ID* e *Tenant*; sorgente riunioni: *Automatico* (account Microsoft se collegato, altrimenti Outlook desktop se disponibile), *Account Microsoft*, *Outlook desktop*.
 - **Pratiche**: elenco dei codici pratica con nome e descrizione, modifica inline, aggiunta ed eliminazione. Piu' sono chiare le descrizioni ("quando usarla / quando non usarla"), migliore e' la classificazione.
 - **Prompt AI**: quattro sezioni modificabili (Introduzione, Regole, Formato output, Messaggio utente), ognuna con **Ripristina default** e badge *modificato*; chip dei segnaposto da inserire con un clic; **Anteprima prompt del giorno** che mostra esattamente cosa verrebbe inviato al modello.

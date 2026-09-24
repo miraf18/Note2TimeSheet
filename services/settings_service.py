@@ -22,6 +22,8 @@ SECTIONS = ("general", "ai", "github", "microsoft")
 PROMPT_FIELDS = ("system_intro", "system_rules", "system_output", "user_template")
 MICROSOFT_SOURCES = ("auto", "graph", "outlook_com")
 REPO_RE = re.compile(r"^[\w.-]+/[\w.-]+$")
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+MAX_AUTHOR_EMAILS = 10
 
 MAX_USER_NAME_LEN = 100
 MAX_MODEL_LEN = 100
@@ -82,6 +84,7 @@ def build_defaults() -> dict:
             "include_commits": True,
             "include_pull_requests": True,
             "include_issues": False,
+            "author_emails": [],
         },
         "microsoft": {
             "client_id": config.env_str("GRAPH_CLIENT_ID", ""),
@@ -293,6 +296,14 @@ def _clean_repos(value: Any) -> Any:
     return list(dict.fromkeys(stripped))
 
 
+def _clean_emails(value: Any) -> Any:
+    """Trim, lowercase and dedupe the git e-mail list (non-lists are left for validation)."""
+    if not isinstance(value, list):
+        return value
+    cleaned = [item.strip().lower() for item in value if isinstance(item, str) and item.strip()]
+    return list(dict.fromkeys(cleaned))
+
+
 def _normalise(settings: dict) -> dict:
     """Coerce types and trim strings so that validation sees canonical values."""
     general = dict(settings.get("general") or {})
@@ -308,7 +319,8 @@ def _normalise(settings: dict) -> dict:
     ai = {**ai, **{field: _prompt_or_none(ai.get(field)) for field in PROMPT_FIELDS},
           "temperature": _to_float(ai.get("temperature"))}
     github = dict(settings.get("github") or {})
-    github = {**github, "client_id": _strip(github.get("client_id")), "repos": _clean_repos(github.get("repos"))}
+    github = {**github, "client_id": _strip(github.get("client_id")), "repos": _clean_repos(github.get("repos")),
+              "author_emails": _clean_emails(github.get("author_emails", []))}
     microsoft = dict(settings.get("microsoft") or {})
     source = microsoft.get("source")
     microsoft = {
@@ -398,6 +410,11 @@ def _github_issues(github: dict) -> list[tuple[str, str]]:
     for flag in ("include_commits", "include_pull_requests", "include_issues"):
         if not isinstance(github.get(flag), bool):
             issues.append((flag, f"L'opzione '{flag}' deve essere vero o falso."))
+    emails = github.get("author_emails", [])
+    if not isinstance(emails, list) or not all(isinstance(e, str) and EMAIL_RE.match(e) for e in emails):
+        issues.append(("author_emails", "Le email dei commit non sono valide (es. nome@azienda.it)."))
+    elif len(emails) > MAX_AUTHOR_EMAILS:
+        issues.append(("author_emails", f"Puoi indicare al massimo {MAX_AUTHOR_EMAILS} email."))
     return issues
 
 

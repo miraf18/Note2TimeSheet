@@ -157,7 +157,8 @@ class TestDefaults:
         assert defaults["ai"] == {"system_intro": None, "system_rules": None, "system_output": None,
                                   "user_template": None, "temperature": 0.2}
         assert defaults["github"] == {"client_id": "", "repos": [], "include_commits": True,
-                                      "include_pull_requests": True, "include_issues": False}
+                                      "include_pull_requests": True, "include_issues": False,
+                                      "author_emails": []}
         assert defaults["microsoft"] == {"client_id": "", "tenant_id": "common", "source": "auto"}
 
     def test_defaults_are_seeded_lazily_from_env(self, monkeypatch):
@@ -314,6 +315,8 @@ class TestValidation:
         ({"github": {"repos": ["a/b/c"]}}, "owner/nome"),
         ({"github": {"client_id": "c" * 201}}, "Client ID"),
         ({"github": {"include_issues": "yes"}}, "include_issues"),
+        ({"github": {"author_emails": ["not-an-email"]}}, "email"),
+        ({"github": {"author_emails": "a@b.it"}}, "email"),
         ({"microsoft": {"client_id": 5}}, "Client ID"),
         ({"microsoft": {"tenant_id": ""}}, "Tenant"),
         ({"microsoft": {"source": "teams"}}, "sorgente"),
@@ -397,3 +400,9 @@ class TestSecrets:
 
     def test_reset_cache_is_noop(self):
         assert settings_service.reset_cache() is None
+
+
+def test_author_emails_are_normalised():
+    result = settings_service.update_settings(
+        {"github": {"author_emails": [" Raffaele@Example.IT ", "raffaele@example.it", "", "other@x.it"]}})
+    assert result["github"]["author_emails"] == ["raffaele@example.it", "other@x.it"]

@@ -184,6 +184,13 @@ export function initGithubCard(ctx, startDeviceLogin) {
     sync('ghIncCommits', gh.include_commits !== false, 'checked');
     sync('ghIncPRs', gh.include_pull_requests !== false, 'checked');
     sync('ghIncIssues', gh.include_issues === true, 'checked');
+    sync('ghAuthorEmails', (Array.isArray(gh.author_emails) ? gh.author_emails : []).join(', '), 'value');
+  }
+
+  /** "a@x.it, b@y.it" → ['a@x.it', 'b@y.it'] (trimmed, lowercased, deduped). */
+  function parseEmails(raw) {
+    const parts = String(raw || '').split(/[,;\s]+/).map((s) => s.trim().toLowerCase()).filter(Boolean);
+    return parts.filter((email, i) => parts.indexOf(email) === i);
   }
 
   /* ── Repo picker ───────────────────────────────────────────── */
@@ -282,12 +289,14 @@ export function initGithubCard(ctx, startDeviceLogin) {
     return !!pane && !pane.classList.contains('hidden') && utils.isModalOpen('settingsModal');
   }
 
-  function includeFlags() {
+  function githubSettingsPatch() {
     const checked = (id) => { const node = byId(id); return !!(node && node.checked); };
+    const emails = byId('ghAuthorEmails');
     return {
       include_commits: checked('ghIncCommits'),
       include_pull_requests: checked('ghIncPRs'),
       include_issues: checked('ghIncIssues'),
+      author_emails: parseEmails(emails ? emails.value : ''),
     };
   }
 
@@ -297,7 +306,7 @@ export function initGithubCard(ctx, startDeviceLogin) {
     try {
       // Sequential: both endpoints write settings.json.
       await api.github.saveRepos(picker.selected);
-      await api.updateSettings({ github: includeFlags() });
+      await api.updateSettings({ github: githubSettingsPatch() });
       rendered = {};
       showToast(MSG.reposSaved, 'success');
       await refreshQuietly(actions.refreshIntegrations(), actions.refreshConfig(), actions.refreshSettings());
